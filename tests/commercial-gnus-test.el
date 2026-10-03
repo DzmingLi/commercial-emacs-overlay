@@ -8,6 +8,26 @@
   (require 'gnus-util)
   (should (= 7 (funcall (gnus-byte-compile '(lambda () 7))))))
 
+(ert-deftest commercial-gnus-refresh-includes-foreign-group-methods ()
+  (let* ((gnus-background-get-unread-articles nil)
+         (gnus-select-method '(nnnil ""))
+         (gnus-select-methods '((nnnil "")))
+         (gnus-activate-level 2)
+         (gnus-activate-foreign-newsgroups 2)
+         (method '(nnatom "test-feed"))
+         (info (gnus-info-make "nnatom+test-feed:example" 2 nil nil method))
+         (gnus-newsrc-alist (list 'dummy info))
+         (received nil))
+    (cl-letf (((symbol-function 'gnus-thread-group-running-p) #'ignore)
+              ((symbol-function 'gnus-find-method-for-group) (lambda (&rest _) method))
+              ((symbol-function 'gnus-similar-server-opened) #'ignore)
+              ((symbol-function 'gnus-get-function) (lambda (&rest _) #'ignore))
+              ((symbol-function 'gnus-archive-server-wanted-p) #'ignore)
+              ((symbol-function 'gnus-get-unread-articles--doit)
+               (lambda (methods _level) (setq received methods))))
+      (gnus-get-unread-articles 2)
+      (should (equal (cdr (assoc method received)) (list info))))))
+
 (ert-deftest commercial-gnus-refresh-yields-and-finishes ()
   ;; Keep the real gnus-get-unread-articles, scheduler and method runner.
   ;; Simulate a network wait at the backend boundary, without user state.

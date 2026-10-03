@@ -1646,8 +1646,7 @@ Sets up `gnus-get-unread-articles--doit'."
 
       (dolist (info (delq nil newsrc))
         (when-let ((group (gnus-info-group info))
-                   (method (gnus-find-method-for-group group info))
-                   (registered (assoc method infos-by-method)))
+                   (method (gnus-find-method-for-group group info)))
           (if (or (and foreign-level (not (numberp foreign-level)))
 	          (funcall (if one-level #'= #'<=)
                            (gnus-info-level info)
@@ -1657,6 +1656,9 @@ Sets up `gnus-get-unread-articles--doit'."
 			                (gnus-methods-equal-p archive-method method)))
                                alevel
 			     foreign-level)))
+              ;; Foreign groups may have a method stored only in their
+              ;; group info, absent from gnus-select-methods.  They still
+              ;; belong in the refresh when their level is eligible.
               (push info (alist-get method infos-by-method nil nil #'equal))
 	    (unless (gnus-active group)
 	      ;; Group is inactive; nix out unread articles such that
