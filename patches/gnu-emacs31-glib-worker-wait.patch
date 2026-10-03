@@ -1,0 +1,30 @@
+--- a/src/xgselect.c
++++ b/src/xgselect.c
+@@ -119,6 +119,12 @@
+ #ifdef USE_GTK
+   bool already_has_events;
+ #endif
++
++  /* Following Commercial Emacs, keep GLib/GTK event handling on the
++     main thread.  Workers wait only for their own I/O descriptors.  */
++  if (!main_thread_p (current_thread))
++    return thread_select (pselect, fds_lim, rfds, wfds, efds,
++                          timeout, sigmask);
+ 
+   if (xg_select_suppress_count)
+     return pselect (fds_lim, rfds, wfds, efds, timeout, sigmask);
+--- a/src/thread.c
++++ b/src/thread.c
+@@ -630,7 +630,11 @@
+   sa->result = (sa->func) (sa->max_fds, sa->rfds, sa->wfds, sa->efds,
+ 			   sa->timeout, sa->sigmask);
+ 
+-  release_select_lock ();
++  /* Workers bypass the GLib context in xg_select.  SELF was captured
++     before releasing the Lisp lock: current_thread may now refer to
++     another thread, so it cannot be used to identify this waiter.  */
++  if (main_thread_p (self))
++    release_select_lock ();
+ 
+   block_interrupt_signal (&oldset);
+   /* If we were interrupted by C-g while inside sa->func above, the
