@@ -37,6 +37,10 @@
 (require 'text-property-search)
 (require 'cl-seq)
 
+;; The compiler may first load inside gnus-byte-compile's binding below.
+;; Declare this special before binding it in a source-loaded Gnus.
+(defvar byte-compile-warnings)
+
 (defcustom gnus-completing-read-function 'gnus-emacs-completing-read
   "Function use to do completing read."
   :version "29.1"
