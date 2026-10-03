@@ -2,3 +2,7 @@ Repository: https://github.com/commercial-emacs/commercial-emacs
 Revision: bf4184f985d0674a7c03c12eb33b66ac833d9e29
 Imported directory: lisp/gnus
 License: GPL-3.0-or-later (see COPYING and individual source headers)
+
+GNU Emacs 31 compatibility: iCalendar parsing adapts the AST-based
+implementation in GNU Emacs 31.1 lisp/gnus/gnus-icalendar.el, retaining
+Commercial Gnus's event participant and recurrence representation.

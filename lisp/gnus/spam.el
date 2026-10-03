@@ -45,9 +45,8 @@
 (require 'gnus)
 (require 'dig)
 
-(eval-when-compile
-  (require 'cl-lib)
-  (require 'hashcash))
+(eval-when-compile (require 'cl-lib))
+(declare-function mail-check-payment "hashcash" ())
 
 ;; autoload spam-report
 (autoload 'spam-report-gmane "spam-report")
@@ -2024,7 +2023,9 @@ See the Info node `(gnus)Fancy Mail Splitting' for more details."
 
 (defun spam-check-hashcash ()
   "Check the headers for hashcash payments."
-  (ignore-errors (mail-check-payment)))  ;mail-check-payment returns a boolean
+  (ignore-errors
+    (require 'hashcash)
+    (mail-check-payment)))  ;mail-check-payment returns a boolean
 
 ;;}}}
 

@@ -5599,6 +5599,9 @@ If SELECT-ARTICLES, only select those articles from GROUP."
 (declare-function gnus-get-predicate "gnus-agent" (predicate))
 
 (defun gnus-summary-display-make-predicate (display)
+  ;; This is also needed when Agent itself is disabled.  Require here to
+  ;; avoid the gnus-agent/gnus-sum circular dependency during file loading.
+  (require 'gnus-agent)
   (when (= (length display) 1)
     (setq display (car display)))
   (unless gnus-summary-display-cache

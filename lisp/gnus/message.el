@@ -718,9 +718,13 @@ The function accepts 1 parameter which is the matched prefix."
   (cond ((executable-find sendmail-program)
 	 #'message-send-mail-with-sendmail)
 	((bound-and-true-p smtpmail-default-smtp-server)
-	 #'message-smtpmail-send-it)
+	 (lambda ()
+           (let ((send-mail-function #'smtpmail-send-it))
+             (message-use-send-mail-function))))
 	(t
-	 #'message-send-mail-with-mailclient)))
+	 (lambda ()
+           (let ((send-mail-function #'mailclient-send-it))
+             (message-use-send-mail-function))))))
 
 (defun message-default-send-mail-function ()
   (cond ((eq send-mail-function #'feedmail-send-it) #'feedmail-send-it)
@@ -3213,7 +3217,7 @@ Like `text-mode', but with these additional commands:
   ;; excluding citations and other artifacts.
   ;;
   (setq-local syntax-propertize-function #'message--syntax-propertize)
-  (add-hook 'before-change-functions #'syntax-ppss-invalidate-cache 99 t)
+  (add-hook 'before-change-functions #'syntax-ppss-flush-cache 99 t)
   (setq-local parse-sexp-ignore-comments t)
   (setq-local message-encoded-mail-cache nil)
   (setq-local image-crop-buffer-text-function #'message--update-image-crop))
@@ -4800,6 +4804,8 @@ Valid types are `send', `return', `exit', `kill' and `postpone'."
       (kill-buffer tembuf))))
 
 (declare-function hashcash-wait-async "hashcash" (&optional buffer))
+(declare-function mail-add-payment "hashcash" ())
+(declare-function mail-add-payment-async "hashcash" ())
 
 (defun message--check-continuation-headers ()
   (message-check 'continuation-headers
@@ -5030,7 +5036,8 @@ that instead."
                                        smtpmail-stream-type))
                (smtpmail-smtp-service (if (> port 0) port service))
                (smtpmail-smtp-user (or (nth 3 method) smtpmail-smtp-user)))
-          (message-smtpmail-send-it)))
+          (let ((send-mail-function #'smtpmail-send-it))
+            (message-use-send-mail-function))))
        (send-function
         (funcall send-function))
        (t
