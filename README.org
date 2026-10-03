@@ -50,6 +50,8 @@ foreign group methods in background refresh, and defers view callbacks when
 a worker dispatches timers while waiting for network output.
 Version 0.1.3 keeps configured servers whose groups exceed the requested
 activation level out of the scanner's new-server discovery fallback.
+Version 0.1.4 declares dynamic binding in generated RSS state files so GNU
+Emacs 31 does not report missing lexical-binding cookies when loading them.
 
 Run =make check=. Tests include the real native scanner with a controlled
 backend wait and a main-loop heartbeat, and notification-thread checks.
