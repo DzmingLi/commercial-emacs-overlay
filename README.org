@@ -48,6 +48,8 @@ variable before Gnus first loads the byte compiler from a source library.
 Version 0.1.2 fixes single-group feed parsing on GNU Emacs, includes eligible
 foreign group methods in background refresh, and defers view callbacks when
 a worker dispatches timers while waiting for network output.
+Version 0.1.3 keeps configured servers whose groups exceed the requested
+activation level out of the scanner's new-server discovery fallback.
 
 Run =make check=. Tests include the real native scanner with a controlled
 backend wait and a main-loop heartbeat, and notification-thread checks.
