@@ -1667,6 +1667,20 @@ Sets up `gnus-get-unread-articles--doit'."
 	      (when-let ((entry (gnus-group-entry group)))
 	        (setcar entry t))))))
 
+      ;; A configured server with only groups above the requested level
+      ;; must not fall through to the worker's "new server" discovery path.
+      (setq infos-by-method
+            (cl-remove-if
+             (lambda (elem)
+               (and (null (cdr elem))
+                    (cl-some
+                     (lambda (info)
+                       (gnus-methods-equal-p
+                        (car elem)
+                        (gnus-find-method-for-group (gnus-info-group info) info)))
+                     (delq nil newsrc))))
+             infos-by-method))
+
       ;; "Extend" means changing "nnimap" to "nnimap+subaccount"
       (let (methods)
         (dolist (elem infos-by-method)
