@@ -126,3 +126,23 @@
     (thread-join worker)
     (should (equal (car reported) "example"))
     (should (eq (cdr reported) main-thread))))
+
+(ert-deftest commercial-gnus-timer-dispatched-in-worker-defers-view ()
+  (let* ((reported nil)
+         (worker-finished nil)
+         (saved (default-value 'commercial-gnus-group-updated-hook)))
+    (unwind-protect
+        (progn
+          (set-default 'commercial-gnus-group-updated-hook
+                       (list (lambda (_) (setq reported (current-thread)))))
+          (thread-join
+           (make-thread
+            (lambda ()
+              (commercial-gnus--run-group-hook "example")
+              (setq worker-finished (not reported))) "test-view-worker"))
+          (should worker-finished)
+          (let ((deadline (+ (float-time) 2)))
+            (while (and (not reported) (< (float-time) deadline))
+              (accept-process-output nil 0.01)))
+          (should (eq reported main-thread)))
+      (set-default 'commercial-gnus-group-updated-hook saved))))

@@ -36,10 +36,14 @@ Consumers may refresh their views.  This hook does not perform network work.")
 
 (defun commercial-gnus--run-group-hook (group)
   "Run view hooks for GROUP without aborting the remaining refreshes."
-  (condition-case err
-      (run-hook-with-args 'commercial-gnus-group-updated-hook group)
-    (error (message "Commercial Gnus view update: %s"
-                    (error-message-string err)))))
+  ;; A worker waiting in accept-process-output can also dispatch timers in
+  ;; GNU Emacs.  Never rebuild the visible Summary in that worker's context.
+  (if (not (eq (current-thread) main-thread))
+      (run-at-time 0.05 nil #'commercial-gnus--run-group-hook group)
+    (condition-case err
+        (run-hook-with-args 'commercial-gnus-group-updated-hook group)
+      (error (message "Commercial Gnus view update: %s"
+                      (error-message-string err))))))
 
 ;;;###autoload
 (defun commercial-gnus-enable ()
