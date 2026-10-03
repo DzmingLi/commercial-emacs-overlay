@@ -1,0 +1,57 @@
+#+title: commercial-gnus
+
+The complete Gnus Lisp tree from Commercial Emacs, packaged for GNU Emacs
+31.1 and later. GNU Emacs remains your editor; no C patches are installed.
+
+* Source and license
+The bundled source is from [[https://github.com/commercial-emacs/commercial-emacs][Commercial Emacs]], pinned to revision
+=bf4184f985d0674a7c03c12eb33b66ac833d9e29=. See =UPSTREAM=, individual source
+headers and =COPYING=. This distribution preserves upstream attribution.
+The first commit imports upstream intact; GNU compatibility changes are a
+separate commit.
+
+* Installation
+Clone the repository and run =make= with GNU Emacs 31.1 or later. At the
+beginning of your init file, before loading Gnus, Message, mu4e or other
+Gnus MIME consumers:
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "/path/to/commercial-gnus")
+(require 'commercial-gnus)
+#+end_src
+
+Restart Emacs after installation or removal. The loader rejects mixing
+already-loaded bundled GNU Gnus libraries with this tree. Do not install
+the separate DzmingLi/gnus-async package: upstream already owns that name.
+This repository intentionally contains no Nix build expression.
+
+* Background scanning
+Use the normal Gnus commands, including =g= in Group. Upstream's
+=gnus-background-get-unread-articles= is enabled by the loader. Configure
+ordinary Gnus activation levels and subscription state as usual.
+
+The native scanner runs methods serially in an Emacs worker thread.
+It does not promise concurrent requests across every backend. Synchronous
+CPU work can still occupy the Lisp interpreter. Posting and fetching a
+thread's replies are not automatically made asynchronous by this package.
+
+=commercial-gnus-group-updated-hook= receives the completed group name on
+the main event loop so consumers such as gnus-timeline can refresh their
+views. View updates use the same subscription/read state as Gnus.
+
+* Compatibility and tests
+The GNU compatibility commit changes Message's syntax cache hook to
+=syntax-ppss-flush-cache= and loads the Summary predicate dependency lazily
+even when Agent is disabled. It does not enable Agent.
+
+Run =make check=. Tests include the real native scanner with a controlled
+backend wait and a main-loop heartbeat, and notification-thread checks.
+An isolated live NixOS Discourse scan returned immediately and fetched 30
+articles; it did not use personal credentials or modify personal newsrc.
+
+Third-party backends continue to use standard Gnus methods. gnus-inbox must
+make its custom Summary mark variables buffer-local without assuming GNU
+Gnus's obsolete =gnus-summary-local-variables= registry exists.
+
+For rollback, remove the loader/package and restart Emacs. This package
+does not replace, rewrite or delete subscription files.
