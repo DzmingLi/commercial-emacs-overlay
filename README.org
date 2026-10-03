@@ -1,7 +1,8 @@
 #+title: commercial-gnus
 
 The complete Gnus Lisp tree from Commercial Emacs, packaged for GNU Emacs
-31.1 and later. GNU Emacs remains your editor; no C patches are installed.
+31.1 and later. GNU Emacs remains your editor. GTK/PGTK builds of GNU Emacs
+31 also need the accompanying C patch for worker-thread network waits.
 
 * Source and license
 The bundled source is from [[https://github.com/commercial-emacs/commercial-emacs][Commercial Emacs]], pinned to revision
@@ -38,6 +39,34 @@ thread's replies are not automatically made asynchronous by this package.
 =commercial-gnus-group-updated-hook= receives the completed group name on
 the main event loop so consumers such as gnus-timeline can refresh their
 views. View updates use the same subscription/read state as Gnus.
+
+* GNU Emacs 31 GTK/PGTK patch
+=patches/gnu-emacs31-glib-worker-wait.patch= keeps GLib/GTK event handling
+on the main thread, following Commercial Emacs's C-level separation.
+GNU Emacs 31's unpatched event loop allows worker waits to acquire and
+release the GUI context across OS threads. In a live PGTK session this
+produced a GLib ownership assertion, a spinning Gnus worker and an
+unresponsive main thread. Lisp-only batch tests do not exercise this path.
+
+Apply the patch to GNU Emacs 31 sources and rebuild the editor. Installing
+or hot-loading the Lisp package does not apply this patch. Other Emacs
+versions need their own source review; the patch is specific to version 31.
+
+For Nix, build the editor with the patch, then derive its package set:
+
+#+begin_src nix
+let
+  patchedEmacs = pkgs.emacs31-pgtk.overrideAttrs (old: {
+    patches = (old.patches or []) ++ [
+      "${commercialGnusSource}/patches/gnu-emacs31-glib-worker-wait.patch"
+    ];
+  });
+  epkgs = pkgs.emacsPackagesFor patchedEmacs;
+in epkgs.emacsWithPackages (epkgs: [ /* commercial-gnus and other packages */ ])
+#+end_src
+
+Use the rebuilt editor and restart its daemon and graphical frames.
+Until that editor is available, avoid starting the GTK background scanner.
 
 * Compatibility and tests
 The GNU compatibility commit changes Message's syntax cache hook to
