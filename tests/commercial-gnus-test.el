@@ -4,6 +4,10 @@
 (require 'gnus-start)
 (require 'gnus-group)
 
+(ert-deftest commercial-gnus-runtime-compilation-with-source-libraries ()
+  (require 'gnus-util)
+  (should (= 7 (funcall (gnus-byte-compile '(lambda () 7))))))
+
 (ert-deftest commercial-gnus-refresh-yields-and-finishes ()
   ;; Keep the real gnus-get-unread-articles, scheduler and method runner.
   ;; Simulate a network wait at the backend boundary, without user state.
