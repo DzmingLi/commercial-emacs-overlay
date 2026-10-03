@@ -20,7 +20,7 @@ patch. There is no separate Lisp loader or competing Gnus package.
 Add this flake input:
 
 #+begin_src nix
-inputs.commercial-gnus.url = "github:DzmingLi/commercial-gnus-overlay/v0.2.0";
+inputs.commercial-gnus.url = "github:DzmingLi/commercial-gnus-overlay/v0.2.1";
 #+end_src
 
 Then select the editor from the overlay and derive packages from it:
