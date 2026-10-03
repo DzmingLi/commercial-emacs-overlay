@@ -70,7 +70,7 @@ not get notifications."
   "Map notifications ids to messages.")
 
 (defun gnus-notifications-action (id key)
-  (when-let ((group-article (assoc id gnus-notifications-id-to-msg))
+  (when-let* ((group-article (assoc id gnus-notifications-id-to-msg))
              (group (cadr group-article))
              (article (nth 2 group-article)))
     (cond ((string= key "read")

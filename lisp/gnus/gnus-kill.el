@@ -362,7 +362,7 @@ Returns the number of articles marked as read."
 	    (dolist (file kill-files)
 	      (unless (file-exists-p file)
 	        (gnus-message 6 "Processing kill file %s..." file)
-                (when-let ((buf (find-file-noselect file)))
+                (when-let* ((buf (find-file-noselect file)))
                   (unwind-protect
                       (with-current-buffer buf
 	                (if (consp (ignore-errors (read (current-buffer))))

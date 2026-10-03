@@ -3780,7 +3780,7 @@ If BACKWARD, move point to the previous group in the group buffer
 If SELECT-ARTICLES, only select those articles from GROUP."
   (catch 'done
     (while t
-      (if-let ((result
+      (if-let* ((result
                 (let (gnus-auto-select-next)
                   (gnus-summary-read-group-1 group show-all no-article
 		                             kill-buffer no-display
@@ -3813,7 +3813,7 @@ with limiting and positioning and windowing and other visual
 effects."
   (gnus-message 7 "Retrieving newsgroup: %s..." group)
   (unwind-protect
-      (if-let ((prepare-p (gnus-summary-setup-buffer group)))
+      (if-let* ((prepare-p (gnus-summary-setup-buffer group)))
           (with-current-buffer (gnus-summary-buffer-name group)
             (cl-case (gnus-select-newsgroup group show-all select-articles)
               (quit
@@ -3824,7 +3824,7 @@ effects."
                     (kill-buffer (current-buffer)))
                (when kill-buffer
                  (gnus-kill-or-deaden-summary kill-buffer))
-               (if-let ((quit-config (gnus-group-quit-config group)))
+               (if-let* ((quit-config (gnus-group-quit-config group)))
                    (gnus-handle-ephemeral-exit quit-config)
                  (set-buffer gnus-group-buffer)
                  (gnus-group-jump-to-group group)
@@ -3835,7 +3835,7 @@ effects."
                (when (and (derived-mode-p 'gnus-summary-mode)
                           (not (equal (current-buffer) kill-buffer)))
                  (kill-buffer (current-buffer))
-                 (if-let ((quit-config (gnus-group-quit-config group)))
+                 (if-let* ((quit-config (gnus-group-quit-config group)))
                      (gnus-handle-ephemeral-exit quit-config)
                    (gnus-summary-update-info) ;; marks might need to be removed
                    (set-buffer gnus-group-buffer)
@@ -3916,7 +3916,7 @@ effects."
                           (not no-display)
                           gnus-newsgroup-unreads
                           gnus-auto-select-first)
-                     (when-let ((art (gnus-summary-article-number)))
+                     (when-let* ((art (gnus-summary-article-number)))
                        (when (and gnus-plugged
                                   (not (memq art gnus-newsgroup-undownloaded))
                                   (not (memq art gnus-newsgroup-downloadable)))
@@ -9172,7 +9172,7 @@ The 1st element is the button named by `gnus-collect-urls-primary-text'."
   (let ((pt (point)) urls primary)
     (while (forward-button 1 nil nil t)
       (setq pt (point))
-      (when-let ((w (button-at pt))
+      (when-let* ((w (button-at pt))
                  (u (or (button-get w 'shr-url)
                         (get-text-property pt 'gnus-string))))
 	(when (string-match-p "\\`[[:alpha:]]+://" u)
@@ -9202,7 +9202,7 @@ See `gnus-collect-urls'."
     (let* ((parsed (url-generic-parse-url url))
            (host (url-host parsed))
            (rest (concat (url-filename parsed)
-                         (when-let ((target (url-target parsed)))
+                         (when-let* ((target (url-target parsed)))
                            (concat "#" target)))))
       (concat host (string-truncate-left rest (- max (length host)))))))
 

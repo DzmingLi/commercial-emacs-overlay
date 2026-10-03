@@ -451,7 +451,7 @@ report."
                            &optional
                            wait-for callback decode)
   "Use COMMAND to retrieve data into BUFFER from PORT on ADDRESS."
-  (if-let ((process (nntp-get-process)))
+  (if-let* ((process (nntp-get-process)))
       (condition-case err
           (progn
             (when (and (not nntp-inhibit-erase)
@@ -480,7 +480,7 @@ report."
   (when (and (not nnheader-callback-function)
              (not nntp-inhibit-output))
     (nntp-erase-buffer nntp-server-buffer))
-  (if-let ((command (mapconcat #'identity strings " "))
+  (if-let* ((command (mapconcat #'identity strings " "))
 	   (process (nntp-get-process))
 	   (buffer (process-buffer process))
 	   (pos (with-current-buffer buffer (point))))
@@ -625,7 +625,7 @@ command whose response triggered the error."
                             (run-at-time
                              nntp-connection-timeout nil
                              (lambda ()
-                               (when-let ((process (nntp-get-process))
+                               (when-let* ((process (nntp-get-process))
                                           (buffer (process-buffer process)))
                                  ;; When I an able to identify the
                                  ;; connection to the server AND I've
@@ -1023,7 +1023,7 @@ unnecessary, and obfuscate things considerably."
 
 (deffoo nntp-close-server (&optional server defs)
   (nntp-change-server server defs)
-  (when-let ((process (nntp-get-process)))
+  (when-let* ((process (nntp-get-process)))
     (when (memq (process-status process) '(open run))
       (ignore-errors
 	(nntp-send-string process "QUIT")
@@ -1043,7 +1043,7 @@ unnecessary, and obfuscate things considerably."
     (dolist (b (cl-remove-if-not
                 (lambda (b) (string-match-p regex (buffer-name b)))
                 (gnus-buffers)))
-      (when-let ((process (get-buffer-process b)))
+      (when-let* ((process (get-buffer-process b)))
         (when (memq (process-status process) '(open run))
 	  (ignore-errors
 	    (nntp-send-string process "QUIT")
@@ -1269,7 +1269,7 @@ If SEND-IF-FORCE, only send authinfo to the server if the
   "We only care about insertions at eob"
   (when (and (zerop len) (eq (point-max) end))
     (save-match-data
-      (when-let ((proc (get-buffer-process (current-buffer))))
+      (when-let* ((proc (get-buffer-process (current-buffer))))
 	(nntp-async-trigger proc)))))
 
 (defun nntp-async-trigger (process)

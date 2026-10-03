@@ -280,7 +280,7 @@ Formerly `gnus-configure-frame'.  Wasn't thread-safe."
 	(and (memq 'point split) window))
        ;; This is a buffer to be selected.
        ((not (memq type '(frame horizontal vertical)))
-	(when-let ((name (if (stringp type)
+	(when-let* ((name (if (stringp type)
                              type
                            (cdr (assq type gnus-window-to-buffer))))
                    (buffer (gnus-get-buffer-create (gnus-window--eval name))))

@@ -167,7 +167,7 @@ If CONFIRM is non-nil, the user will be asked for an NNTP server."
       (format-message
        "%s (%s) open error%s.  Continue? "
        (car gnus-select-method) (cadr gnus-select-method)
-       (if-let ((status (gnus-status-message gnus-select-method))
+       (if-let* ((status (gnus-status-message gnus-select-method))
                 (status* (not (zerop (length status)))))
            (format ": `%s'" status)
          "")))
@@ -361,7 +361,7 @@ If it is down, start it up (again)."
 	(funcall (gnus-get-function gnus-command-method 'close-server)
 	         (nth 1 gnus-command-method)
 	         (nthcdr 2 gnus-command-method))
-      (when-let ((elem (assoc gnus-command-method gnus-opened-servers)))
+      (when-let* ((elem (assoc gnus-command-method gnus-opened-servers)))
         (setf (nth 1 elem) 'closed)))))
 
 (defun gnus-request-list (command-method)

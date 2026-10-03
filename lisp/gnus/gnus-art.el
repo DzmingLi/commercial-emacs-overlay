@@ -2415,7 +2415,7 @@ fill width."
 (defun article-emojize-symbols ()
   "Display symbols (that have an emoji version) as emojis."
   (interactive nil gnus-article-mode)
-  (when-let ((font (and (display-multi-font-p)
+  (when-let* ((font (and (display-multi-font-p)
                         (car (internal-char-font nil ?😀)))))
     (save-excursion
       (let ((inhibit-read-only t))
@@ -4632,7 +4632,7 @@ commands:
            (original (progn (string-match "\\*Article" name)
                             (concat " *Original Article"
                                     (substring name (match-end 0))))))
-      (when-let ((existing-buffer (get-buffer name)))
+      (when-let* ((existing-buffer (get-buffer name)))
         (with-current-buffer existing-buffer
           (when (eq major-mode 'gnus-article-edit-mode)
             (if (y-or-n-p "Article mode edit in progress; discard? ")
@@ -4782,7 +4782,7 @@ If ALL-HEADERS is non-nil, no headers are hidden."
                (set-window-point (get-buffer-window (current-buffer)) (point))
                (gnus-configure-windows 'article)
                ;; Make sure the article begins with the top of the header.
-               (when-let ((window (get-buffer-window gnus-article-buffer)))
+               (when-let* ((window (get-buffer-window gnus-article-buffer)))
                  (with-current-buffer (window-buffer window)
                    (set-window-point window (point-min))))
                (gnus-run-hooks 'gnus-article-prepare-hook)

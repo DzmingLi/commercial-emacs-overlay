@@ -276,7 +276,7 @@ SPECS should be an alist including an `nnselect-function' and an
 the artlist.  If SPECS is nil retrieve the specs from the group
 parameters."
   (let ((result []))
-    (when-let ((specs (or specs (gnus-group-get-parameter group 'nnselect-specs t)))
+    (when-let* ((specs (or specs (gnus-group-get-parameter group 'nnselect-specs t)))
                (f (alist-get 'nnselect-function specs)))
       (condition-case-unless-debug err
           (setq result (funcall f (alist-get 'nnselect-args specs)))
