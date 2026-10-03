@@ -1,0 +1,23 @@
+--- a/lisp/net/shr.el
++++ b/lisp/net/shr.el
+@@ -1161,8 +1161,18 @@
+       (when (or (search-forward "\n\n" nil t)
+ 		(search-forward "\r\n\r\n" nil t))
+ 	(let ((data (shr-parse-image-data)))
+-	  (with-current-buffer buffer
+-	    (shr-replace-image data start end flags)))))
++          (with-current-buffer buffer
++            (save-restriction
++              (widen)
++              ;; Redrawing a document can erase a pending placeholder and
++              ;; collapse both markers.  Cache the response above, but do
++              ;; not insert it into the replacement document's text.
++              (when (and (markerp start) (markerp end)
++                         (eq (marker-buffer start) buffer)
++                         (eq (marker-buffer end) buffer)
++                         (< start end)
++                         (get-text-property start 'image-url))
++                (shr-replace-image data start end flags)))))))
+     (kill-buffer image-buffer)))
+ 
+ (defun shr-image-from-data (data)

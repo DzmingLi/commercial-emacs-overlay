@@ -87,3 +87,9 @@ Gnus's obsolete =gnus-summary-local-variables= registry exists.
 
 For rollback, select the original nixpkgs editor and restart Emacs.
 The overlay does not replace, rewrite or delete subscription files.
+
+* Pending HTML images
+=patches/gnu-emacs31-shr-stale-image.patch= prevents an image request from
+writing into a document whose placeholder was erased during redisplay.
+Downloaded images are still cached. This patch is independent of the GTK
+worker wait fix and can also be applied without Commercial Gnus.

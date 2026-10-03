@@ -5,6 +5,7 @@
       emacs31-pgtk-commercial-gnus = prev.emacs31-pgtk.overrideAttrs (old: {
         patches = (old.patches or [ ]) ++ [
           ./patches/gnu-emacs31-glib-worker-wait.patch
+          ./patches/gnu-emacs31-shr-stale-image.patch
         ];
         postPatch = (old.postPatch or "") + ''
           # Replace the complete built-in tree before autoload generation and

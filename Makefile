@@ -8,3 +8,7 @@ lisp/gnus/commercial-gnus-loaddefs.el: $(filter-out lisp/gnus/commercial-gnus-lo
 
 check: all
 	$(EMACS) --batch -Q -L lisp/gnus -l tests/commercial-gnus-test.el -f ert-run-tests-batch-and-exit
+
+# SHR tests require an Emacs source tree with the overlay patch applied.
+check-shr:
+	$(EMACS) --batch -Q -l tests/shr-image-test.el -f ert-run-tests-batch-and-exit
