@@ -59,6 +59,23 @@
     (should (file-in-directory-p (symbol-file feature 'provide)
                                 commercial-gnus--directory))))
 
+(ert-deftest commercial-gnus-feed-parses-one-group-with-gnu-cons ()
+  (require 'nnfeed)
+  (let ((nnfeed-servers (make-hash-table :test 'equal))
+        (nnfeed-group-names (make-hash-table :test 'equal))
+        (nnfeed-backend 'nnatom)
+        (nnfeed-read-feed-function (lambda (&rest _) '(feed-data)))
+        (nnfeed-read-title-function (lambda (_) "example"))
+        (nnfeed-read-description-function #'ignore)
+        (nnfeed-read-group-author-function #'ignore)
+        (nnfeed-read-article-function (lambda (&rest _) nil)))
+    (cl-letf (((symbol-function 'nnfeed--server-address) #'identity)
+              ((symbol-function 'nnfeed--read-server) #'ignore)
+              ((symbol-function 'gnus-get-info) #'ignore))
+      (let ((result (nnfeed--parse-feed "test-feed" "example")))
+        (should (hash-table-p result))
+        (should (equal (aref (gethash "example" result) 0) "example"))))))
+
 (ert-deftest commercial-gnus-message-editing-flushes-syntax-cache ()
   (require 'message)
   (with-temp-buffer
