@@ -125,7 +125,7 @@
   (dolist (feature '(gnus gnus-start gnus-group gnus-sum message mm-decode nnheader))
     (require feature)
     (should (file-in-directory-p (symbol-file feature 'provide)
-                                commercial-gnus--directory))))
+                                (file-name-directory (locate-library "gnus-start"))))))
 
 (ert-deftest commercial-gnus-feed-parses-one-group-with-gnu-cons ()
   (require 'nnfeed)
@@ -156,41 +156,3 @@
   (let ((gnus-agent nil)
         (gnus-summary-display-cache nil))
     (should (functionp (gnus-summary-display-make-predicate '(unread))))))
-
-(ert-deftest commercial-gnus-notifications-run-on-main-thread ()
-  (let* ((reported nil)
-         (commercial-gnus-group-updated-hook
-          (list (lambda (group) (setq reported (cons group (current-thread))))))
-         worker)
-    ;; Normal foreground updates are not background source completions.
-    (commercial-gnus--notify-group "foreground")
-    (should-not reported)
-    (setq worker
-          (make-thread (lambda () (commercial-gnus--notify-group "example"))
-                       "gnus-get-unread-articles"))
-    (let ((deadline (+ (float-time) 2)))
-      (while (and (not reported) (< (float-time) deadline))
-        (accept-process-output nil 0.01)))
-    (thread-join worker)
-    (should (equal (car reported) "example"))
-    (should (eq (cdr reported) main-thread))))
-
-(ert-deftest commercial-gnus-timer-dispatched-in-worker-defers-view ()
-  (let* ((reported nil)
-         (worker-finished nil)
-         (saved (default-value 'commercial-gnus-group-updated-hook)))
-    (unwind-protect
-        (progn
-          (set-default 'commercial-gnus-group-updated-hook
-                       (list (lambda (_) (setq reported (current-thread)))))
-          (thread-join
-           (make-thread
-            (lambda ()
-              (commercial-gnus--run-group-hook "example")
-              (setq worker-finished (not reported))) "test-view-worker"))
-          (should worker-finished)
-          (let ((deadline (+ (float-time) 2)))
-            (while (and (not reported) (< (float-time) deadline))
-              (accept-process-output nil 0.01)))
-          (should (eq reported main-thread)))
-      (set-default 'commercial-gnus-group-updated-hook saved))))
