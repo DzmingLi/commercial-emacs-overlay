@@ -314,7 +314,7 @@ If GROUP is omitted or nil, parse the entire FEED."
          (group (aref (gethash group s `[,group]) 0)) ; Real name (or nil)
          data)
     (when (setq data (funcall nnfeed-read-feed-function feed group))
-      (while-let ((cg (or (and name (cons data)) ; `data' is a single group
+      (while-let ((cg (or (and name (cons data nil)) ; `data' is a single group
                           (funcall nnfeed-read-group-function data)))
                   (cg (prog1 (car cg) (setq data (cdr cg)))))
         (let* ((name (funcall nnfeed-read-title-function cg)) ; Real name
