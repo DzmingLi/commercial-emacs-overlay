@@ -504,7 +504,7 @@ which RSS 2.0 allows."
   (let ((coding-system-for-write nnrss-file-coding-system)
 	(file-name-coding-system nnmail-pathname-coding-system))
     (with-temp-file (nnrss-make-filename "nnrss" server)
-      (insert (format ";; -*- coding: %s; -*-\n"
+      (insert (format ";; -*- coding: %s; lexical-binding: nil; -*-\n"
 		      nnrss-file-coding-system))
       (gnus-prin1 `(setq nnrss-group-alist ',nnrss-group-alist))
       (insert "\n")
@@ -534,7 +534,7 @@ which RSS 2.0 allows."
   (let ((coding-system-for-write nnrss-file-coding-system)
 	(file-name-coding-system nnmail-pathname-coding-system))
     (with-temp-file (nnrss-make-filename group server)
-      (insert (format ";; -*- coding: %s; -*-\n"
+      (insert (format ";; -*- coding: %s; lexical-binding: nil; -*-\n"
 		      nnrss-file-coding-system))
       (gnus-prin1 `(setq nnrss-group-data ',nnrss-group-data)))))
 
