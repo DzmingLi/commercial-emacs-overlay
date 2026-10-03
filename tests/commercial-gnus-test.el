@@ -4,6 +4,29 @@
 (require 'gnus-start)
 (require 'gnus-group)
 
+(ert-deftest commercial-gnus-rss-data-declares-dynamic-binding ()
+  (require 'nnrss)
+  (let ((nnrss-directory (make-temp-file "gnus-rss-data-" t))
+        (nnrss-group-alist '(("example" "https://example.invalid/rss" "Example")))
+        (nnrss-server-data '(("example" 1)))
+        (nnrss-group-data nil))
+    (unwind-protect
+        (progn
+          (nnrss-save-server-data "")
+          (nnrss-save-group-data "example" "")
+          (dolist (name '("nnrss" "example"))
+            (with-temp-buffer
+              (insert-file-contents (nnrss-make-filename name ""))
+              (should (looking-at ";; .*lexical-binding: nil;"))))
+          (let (warnings)
+            (cl-letf (((symbol-function 'display-warning)
+                       (lambda (&rest args) (push args warnings))))
+              (nnrss-read-server-data "")
+              (nnrss-read-group-data "example" ""))
+            (should-not warnings))
+          (should (equal nnrss-server-data '(("example" 1)))))
+      (delete-directory nnrss-directory t))))
+
 (ert-deftest commercial-gnus-runtime-compilation-with-source-libraries ()
   (require 'gnus-util)
   (should (= 7 (funcall (gnus-byte-compile '(lambda () 7))))))
