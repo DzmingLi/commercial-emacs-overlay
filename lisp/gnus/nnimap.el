@@ -279,7 +279,7 @@ during splitting, which may be slow."
   (declare (indent defun))
   `(let ((key (nnimap-process-buffer-key)))
      (with-mutex (nnimap--mutex-for-key key)
-       (let* ((extant (when-let ((extant*
+       (let* ((extant (when-let* ((extant*
                                   (cl-find-if (lambda (b)
                                                 (equal key (buffer-name b)))
                                               (gnus-buffers))))
@@ -1437,7 +1437,7 @@ If LIMIT, first try to limit the search to the N last articles."
   (when (nnimap-change-group nil server)
     (nnimap-with-context nntp-server-buffer
       (erase-buffer)
-      (when-let ((groups (nnimap-with-process-buffer (nnimap-get-groups))))
+      (when-let* ((groups (nnimap-with-process-buffer (nnimap-get-groups))))
         (prog1 t
 	  (let (sequences responses)
 	    (nnimap-with-process-buffer

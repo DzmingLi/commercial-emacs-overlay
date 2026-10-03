@@ -337,7 +337,7 @@ The following commands are available:
   (gnus-server-position-point))
 
 (defsubst gnus-server--server-name (which)
-  (when-let ((server
+  (when-let* ((server
               (save-excursion
                 (let (prop)
                   (while (and (null (setq prop (get-text-property (line-beginning-position) which)))

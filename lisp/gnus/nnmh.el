@@ -554,7 +554,7 @@ as unread by Gnus.")
 		 (mapcar
 		  (lambda (art)
 		    (cons art
-			  (when-let ((modtime
+			  (when-let* ((modtime
 				      (file-attribute-modification-time
 				       (file-attributes
 					(concat dir (int-to-string art))))))

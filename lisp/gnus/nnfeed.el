@@ -277,7 +277,7 @@ group names to their data, which should be a vector of the form
 
 (defun nnfeed--read-server (server)
   "Read SERVER's information from storage."
-  (if-let ((f (nnfeed--server-file server))
+  (if-let* ((f (nnfeed--server-file server))
            ((file-readable-p f)))
       (with-temp-buffer
         (insert-file-contents f)
@@ -287,9 +287,9 @@ group names to their data, which should be a vector of the form
 
 (defun nnfeed--write-server (server)
   "Write SERVER's information to storage."
-  (if-let ((f (nnfeed--server-file server))
+  (if-let* ((f (nnfeed--server-file server))
            ((file-writable-p f)))
-      (if-let ((s (gethash server nnfeed-servers))
+      (if-let* ((s (gethash server nnfeed-servers))
                ((hash-table-p s)))
           (with-temp-file f
             (insert ";;;; -*- mode: lisp-data -*- DO NOT EDIT\n")
@@ -346,7 +346,7 @@ If GROUP is omitted or nil, parse the entire FEED."
           (and desc (aset g 5 desc))
           (while-let ((article (funcall nnfeed-read-article-function cg stale))
                       (article (prog1 (car article) (setq cg (cdr article)))))
-            (when-let ((id (funcall nnfeed-read-id-function article))
+            (when-let* ((id (funcall nnfeed-read-id-function article))
                        (id (format "<%s@%s.%s>" id name nnfeed-backend)))
               (let* ((num (gethash id ids))
                      (update (funcall nnfeed-read-update-date-function article))
@@ -423,14 +423,14 @@ Each value in this table should be a vector of the form
 
 (defun nnfeed--group-data (group server)
   "Get parsed data for GROUP from SERVER."
-  (when-let ((server (nnfeed--server-address server))
+  (when-let* ((server (nnfeed--server-address server))
              (s (gethash server nnfeed-servers))
              ((hash-table-p s)))
     (gethash group s)))
 
 (defun nnfeed-retrieve-article (article group)
   "Retrieve headers for ARTICLE from GROUP."
-  (if-let ((a (gethash article (aref group 2))))
+  (if-let* ((a (gethash article (aref group 2))))
       (insert (format "221 %s Article retrieved.
 From: %s\nSubject: %s\nDate: %s\nMessage-ID: %s\n.\n"
                       article
@@ -441,7 +441,7 @@ From: %s\nSubject: %s\nDate: %s\nMessage-ID: %s\n.\n"
     (insert "404 Article not found.\n.\n")))
 
 (deffoo nnfeed-retrieve-headers (articles &optional group server _fetch-old)
-  (if-let ((server (or server (nnfeed--current-server-no-prefix)))
+  (if-let* ((server (or server (nnfeed--current-server-no-prefix)))
            (g (or (nnfeed--group-data group server)
                   `[ nil ,nnfeed-group-article-ids ,nnfeed-group-articles
                      nil nil nil])))
@@ -513,7 +513,7 @@ by `nnfeed-read-parts-function'), and links (as returned by
 Only HEADERS of a type included in MIME are considered."
   (concat
    (mapconcat (lambda (header)
-                (when-let ((m (car-safe header))
+                (when-let* ((m (car-safe header))
                            ((member m mime)))
                   (format "%s: %s\n" m (cdr header))))
               headers)
@@ -521,7 +521,7 @@ Only HEADERS of a type included in MIME are considered."
    (funcall nnfeed-print-content-function content headers links)))
 
 (deffoo nnfeed-request-article (article &optional group server to-buffer)
-  (if-let ((server (or server (nnfeed--current-server-no-prefix)))
+  (if-let* ((server (or server (nnfeed--current-server-no-prefix)))
            (g (or (nnfeed--group-data group server)
                   (and (setq group nnfeed-group)
                        `[ nil ,nnfeed-group-article-ids
@@ -575,7 +575,7 @@ Only HEADERS of a type included in MIME are considered."
 (deffoo nnfeed-request-group (group &optional server fast _info)
   (with-current-buffer nntp-server-buffer
     (erase-buffer)
-    (if-let ((server (or server (nnfeed--current-server-no-prefix)))
+    (if-let* ((server (or server (nnfeed--current-server-no-prefix)))
              (g (or (if fast (nnfeed--group-data group server)
                       (setq server (nnfeed--parse-feed server group))
                       (and (hash-table-p server) (gethash group server)))
@@ -608,7 +608,7 @@ Only HEADERS of a type included in MIME are considered."
 (deffoo nnfeed-request-list (&optional server)
   (with-current-buffer nntp-server-buffer
     (erase-buffer)
-    (when-let ((p (point))
+    (when-let* ((p (point))
                (s (nnfeed--parse-feed
                    (or server (nnfeed--current-server-no-prefix))))
                ((hash-table-p s)))
@@ -634,12 +634,12 @@ Only HEADERS of a type included in MIME are considered."
 ;; separates the group name from the description with either a tab or a space.
 (defun nnfeed--group-description (name group)
   "Return a description line for a GROUP called NAME."
-  (when-let ((desc (aref group 5))
+  (when-let* ((desc (aref group 5))
              ((not (string-blank-p desc))))
     (insert name "\t" desc "\n")))
 
 (deffoo nnfeed-request-group-description (group &optional server)
-  (when-let ((server (or server (nnfeed--current-server-no-prefix)))
+  (when-let* ((server (or server (nnfeed--current-server-no-prefix)))
              (g (nnfeed--group-data group server)))
     (with-current-buffer nntp-server-buffer
       (erase-buffer)
@@ -647,7 +647,7 @@ Only HEADERS of a type included in MIME are considered."
       t)))
 
 (deffoo nnfeed-request-list-newsgroups (&optional server)
-  (when-let ((server (or server (nnfeed--current-server-no-prefix)))
+  (when-let* ((server (or server (nnfeed--current-server-no-prefix)))
              (s (gethash (nnfeed--server-address server) nnfeed-servers))
              ((hash-table-p s)))
     (with-current-buffer nntp-server-buffer
@@ -656,7 +656,7 @@ Only HEADERS of a type included in MIME are considered."
       t)))
 
 (deffoo nnfeed-request-rename-group (group new-name &optional server)
-  (when-let ((server (or server (nnfeed--current-server-no-prefix)))
+  (when-let* ((server (or server (nnfeed--current-server-no-prefix)))
              (a (nnfeed--server-address server))
              (s (or (gethash a nnfeed-servers)
                     (and ; Open the server to add it to `nnfeed-servers'

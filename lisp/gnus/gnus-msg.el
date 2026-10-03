@@ -1104,7 +1104,7 @@ VERY-WIDE is a list of other articles to reply to."
 	(gnus-msg-treat-broken-reply-to gnus-msg-force-broken-reply-to)
         (save-restriction
           (message-narrow-to-head)
-          (when-let ((very-wide-headers
+          (when-let* ((very-wide-headers
                       (save-current-buffer
                         (let (result)
                           (dolist (art very-wide result)

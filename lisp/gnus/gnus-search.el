@@ -1011,7 +1011,7 @@ Responsible for handling and, or, and parenthetical expressions.")
   (let (clauses)
     (mapc
      (lambda (item)
-       (when-let ((expr (gnus-search-transform-expression engine item)))
+       (when-let* ((expr (gnus-search-transform-expression engine item)))
 	 (push expr clauses)))
      query)
     (mapconcat #'identity (reverse clauses) " ")))
@@ -1487,7 +1487,7 @@ Returns a list of [group article score] vectors."
 	    (push (list f-name article group score)
                   artlist)))))
     ;; Are we running an additional grep query?
-    (when-let ((grep-reg (alist-get 'grep query)))
+    (when-let* ((grep-reg (alist-get 'grep query)))
       (setq artlist (gnus-search-grep-search engine artlist grep-reg)))
 
     (when (>= gnus-verbose 7)
@@ -1718,7 +1718,7 @@ cross our fingers for the rest of it."
   (let (clauses)
     (mapc
      (lambda (item)
-       (when-let ((expr (if (consp (car-safe item))
+       (when-let* ((expr (if (consp (car-safe item))
 			    (gnus-search-transform engine item)
 			  (gnus-search-transform-expression engine item))))
 	 (push expr clauses)))
@@ -2142,7 +2142,7 @@ remaining string, then adds all that to the top-level spec."
 		      (assoc-string srv gnus-search-engine-instance-alist t))
 		     (nth 1 engine-config)
 		     (cdr-safe (assoc (car method) gnus-search-default-engines))
-		     (when-let ((old (assoc 'nnir-search-engine
+		     (when-let* ((old (assoc 'nnir-search-engine
 					    (cddr method))))
 		       (nnheader-message
 			8 "\"nnir-search-engine\" is no longer a valid parameter")

@@ -701,7 +701,7 @@ the first newsgroup."
 	gnus-ephemeral-servers nil)
   (gnus-shutdown 'gnus)
   ;; Kill the startup file.
-  (when-let ((buffer (get-file-buffer gnus-newsrc-file)))
+  (when-let* ((buffer (get-file-buffer gnus-newsrc-file)))
     (kill-buffer buffer))
   ;; Clear the dribble buffer.
   (gnus-dribble-clear)
@@ -1545,7 +1545,7 @@ backend check whether the group actually exists."
          ,@forms))))
 
 (defun gnus-thread-group-running-p (thread-group)
-  (when-let ((thr (cl-some (lambda (thr)
+  (when-let* ((thr (cl-some (lambda (thr)
                              (when (cl-search thread-group (thread-name thr))
                                thr))
                            (all-threads))))
@@ -1625,7 +1625,7 @@ Sets up `gnus-get-unread-articles--doit'."
   (defvar gnus-agent-article-local-times)
   (cl-assert (eq (current-thread) main-thread))
 
-  (if-let ((pending (gnus-thread-group-running-p gnus-thread-group)))
+  (if-let* ((pending (gnus-thread-group-running-p gnus-thread-group)))
       (gnus-message 3 "gnus-get-unread-articles: %s still running" pending)
     (let* ((newsrc (cdr gnus-newsrc-alist))
 	   (alevel (or level gnus-activate-level (1+ gnus-level-subscribed)))
@@ -1645,7 +1645,7 @@ Sets up `gnus-get-unread-articles--doit'."
       (gnus-message 6 "Checking new news...")
 
       (dolist (info (delq nil newsrc))
-        (when-let ((group (gnus-info-group info))
+        (when-let* ((group (gnus-info-group info))
                    (method (gnus-find-method-for-group group info)))
           (if (or (and foreign-level (not (numberp foreign-level)))
 	          (funcall (if one-level #'= #'<=)
@@ -1664,7 +1664,7 @@ Sets up `gnus-get-unread-articles--doit'."
 	      ;; Group is inactive; nix out unread articles such that
 	      ;; (gnus-group-unread group) returns t.  See also
 	      ;; `gnus-group-prepare-flat'.
-	      (when-let ((entry (gnus-group-entry group)))
+	      (when-let* ((entry (gnus-group-entry group)))
 	        (setcar entry t))))))
 
       ;; A configured server with only groups above the requested level
@@ -1816,7 +1816,7 @@ Sets up `gnus-get-unread-articles--doit'."
       (error (gnus-message-with-timestamp
               "gnus-get-unread-articles--doit: error coda %s"
               (error-message-string err))))
-    (when-let ((timer (cl-find-if (lambda (timer)
+    (when-let* ((timer (cl-find-if (lambda (timer)
                                     (eq (timer--function timer)
                                         #'gnus-time-out-thread))
                                   timer-list)))

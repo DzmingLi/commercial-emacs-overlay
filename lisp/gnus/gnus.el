@@ -1043,7 +1043,7 @@ Check the NNTPSERVER environment variable and the
 (defvar gnus-secondary-select-methods)
 (defvar gnus-select-methods)
 (defcustom gnus-select-method
-  (if-let ((nntp (or (gnus-getenv-nntpserver)
+  (if-let* ((nntp (or (gnus-getenv-nntpserver)
                      (unless (zerop (length gnus-default-nntp-server))
                        gnus-default-nntp-server))))
       `(nntp ,nntp)
@@ -3173,7 +3173,7 @@ g -- Group name."
   "Check whether GROUP supports function FUNC.
 GROUP can either be a string (a group name) or a select method."
   (ignore-errors
-    (when-let ((method (if (stringp group)
+    (when-let* ((method (if (stringp group)
 		           (car (gnus-find-method-for-group group))
 		         group)))
       (unless (featurep method)
@@ -3320,7 +3320,7 @@ that that variable is buffer-local to the summary buffers."
 		(car servers))
               (catch 'done
                 (dolist (info (cdr gnus-newsrc-alist))
-                  (when-let ((method (gnus-info-method info))
+                  (when-let* ((method (gnus-info-method info))
                              (other (ignore-errors (gnus-method-to-server method nil t))))
                     (when (equal server other)
                       (throw 'done method))))))))
