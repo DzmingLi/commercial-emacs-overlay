@@ -45,6 +45,9 @@ The GNU compatibility commit changes Message's syntax cache hook to
 even when Agent is disabled. It does not enable Agent.
 Version 0.1.1 also declares the compiler's dynamically bound warning
 variable before Gnus first loads the byte compiler from a source library.
+Version 0.1.2 fixes single-group feed parsing on GNU Emacs, includes eligible
+foreign group methods in background refresh, and defers view callbacks when
+a worker dispatches timers while waiting for network output.
 
 Run =make check=. Tests include the real native scanner with a controlled
 backend wait and a main-loop heartbeat, and notification-thread checks.

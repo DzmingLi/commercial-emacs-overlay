@@ -1,6 +1,6 @@
 ;;; commercial-gnus.el --- Commercial Gnus for GNU Emacs -*- lexical-binding: t; -*-
 
-;; Version: 0.1.1
+;; Version: 0.1.2
 ;; Package-Requires: ((emacs "31.1"))
 ;; Keywords: news, mail
 ;; URL: https://github.com/DzmingLi/commercial-gnus
