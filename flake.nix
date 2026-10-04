@@ -1,8 +1,8 @@
 {
-  description = "GNU Emacs 31 with Commercial Gnus and GTK worker-wait fixes";
+  description = "GNU Emacs 31 with Commercial Gnus, native window borders and GTK worker-wait fixes";
   outputs = { self }: {
     overlays.default = final: prev: {
-      emacs31-pgtk-commercial-gnus = prev.emacs31-pgtk.overrideAttrs (old: {
+      emacs31-pgtk-commercial = prev.emacs31-pgtk.overrideAttrs (old: {
         patches = (old.patches or [ ]) ++ [
           ./patches/gnu-emacs31-glib-worker-wait.patch
           ./patches/gnu-emacs31-shr-stale-image.patch
@@ -18,6 +18,7 @@
         passthru = (old.passthru or { }) // {
           commercialGnusRevision = "bf4184f985d0674a7c03c12eb33b66ac833d9e29";
           commercialGnusVersion = "0.3.2";
+          commercialEmacsOverlayVersion = "0.4.0";
         };
       });
     };

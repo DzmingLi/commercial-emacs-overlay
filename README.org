@@ -1,8 +1,8 @@
-#+title: commercial-gnus-overlay
+#+title: commercial-emacs-overlay
 
-The complete Gnus Lisp tree from Commercial Emacs, packaged for GNU Emacs
-31.1 and later. GNU Emacs remains your editor. GTK/PGTK builds of GNU Emacs
-31 also need the accompanying C patch for worker-thread network waits.
+Selected Commercial Emacs features ported to GNU Emacs 31: the complete
+Gnus Lisp tree, native selected-window borders and GTK worker-thread wait
+fixes. GNU Emacs remains the base editor.
 
 * Source and license
 The bundled source is from [[https://github.com/commercial-emacs/commercial-emacs][Commercial Emacs]], pinned to revision
@@ -14,21 +14,20 @@ separate commit.
 * Installation with Nix
 This repository exports =overlays.default=. It builds GNU Emacs 31 PGTK
 with the complete built-in =lisp/gnus= tree replaced before autoload
-generation and byte/native compilation, and applies the accompanying C
-patch. There is no separate Lisp loader or competing Gnus package.
+generation and byte/native compilation, and applies the native C patches. There is no separate Lisp loader or competing Gnus package.
 
 Add this flake input:
 
 #+begin_src nix
-inputs.commercial-gnus.url = "github:DzmingLi/commercial-gnus-overlay/v0.3.2";
+inputs.commercial-emacs.url = "github:DzmingLi/commercial-emacs-overlay/v0.4.0";
 #+end_src
 
 Then select the editor from the overlay and derive packages from it:
 
 #+begin_src nix
 let
-  gnusPkgs = pkgs.extend inputs.commercial-gnus.overlays.default;
-  editor = gnusPkgs.emacs31-pgtk-commercial-gnus;
+  commercialPkgs = pkgs.extend inputs.commercial-emacs.overlays.default;
+  editor = commercialPkgs.emacs31-pgtk-commercial;
   epkgs = pkgs.emacsPackagesFor editor;
 in epkgs.emacsWithPackages (epkgs: [ /* your other packages */ ])
 #+end_src
