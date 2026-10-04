@@ -6,6 +6,7 @@
         patches = (old.patches or [ ]) ++ [
           ./patches/gnu-emacs31-glib-worker-wait.patch
           ./patches/gnu-emacs31-shr-stale-image.patch
+          ./patches/gnu-emacs31-window-border.patch
         ];
         postPatch = (old.postPatch or "") + ''
           # Replace the complete built-in tree before autoload generation and

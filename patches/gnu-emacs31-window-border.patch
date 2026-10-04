@@ -1,0 +1,1583 @@
+--- a/lisp/faces.el
++++ b/lisp/faces.el
+@@ -2881,6 +2881,18 @@
+   :group 'window-divider
+   :group 'basic-faces)
+ 
++(defface window-border
++  '((((class color grayscale) (min-colors 88) (background light))
++     :foreground "blue")
++    (((class color grayscale) (min-colors 88) (background dark))
++     :foreground "cyan")
++    (t :foreground "blue"))
++  "Basic face for borders around selected windows.
++This face is used to draw a rectangular border around the selected
++window when window borders are enabled via `set-window-border'."
++  :version "30.1"
++  :group 'basic-faces)
++
+ (defface internal-border
+     '((t nil))
+   "Basic face for the internal border.
+--- a/lisp/window-border.el
++++ b/lisp/window-border.el
+@@ -0,0 +1,41 @@
++;;; window-border.el --- where we at???  -*- lexical-binding:t -*-
++
++;; Copyright (C) 2025 commandlinesystems.com
++
++(defcustom window-border-width (min 2 (frame-char-height))
++  "Width of the border around the selected window in pixels."
++  :type 'natnum
++  :group 'windows
++  :set (lambda (sym val)
++         (let ((max-height (max 1 (/ (frame-char-height) 2))))
++           (when (or (not (integerp val)) (< val 1) (> val max-height))
++             (user-error "window-border-width must be between 1 and %d" max-height))
++           (set-default sym val)
++           (when (bound-and-true-p window-border-mode)
++             (window-border-mode -1)
++             (window-border-mode 1)))))
++
++;;;###autoload
++(define-minor-mode window-border-mode
++  "Highlight the selected window with a rectangular border."
++  :global t
++  :group 'windows
++  (when (and window-border-mode
++             (not (or (featurep 'x) (featurep 'pgtk))))
++    (setq window-border-mode nil)
++    (user-error "window-border-mode requires an X or PGTK frame"))
++  (if window-border-mode
++      (if (or (not (integerp window-border-width))
++              (<= window-border-width 0))
++          (progn
++            (setq window-border-mode nil)
++            (window-border--primitive 0)
++            (user-error "window-border-width %s not a positive integer"
++                        window-border-width))
++        (window-border--primitive window-border-width))
++    (window-border--primitive 0))
++  (redraw-display))
++
++(provide 'window-border)
++
++;;; window-border.el ends here
+--- a/src/dispextern.h
++++ b/src/dispextern.h
+@@ -228,7 +228,8 @@
+   ON_VERTICAL_SCROLL_BAR,
+   ON_HORIZONTAL_SCROLL_BAR,
+   ON_RIGHT_DIVIDER,
+-  ON_BOTTOM_DIVIDER
++  ON_BOTTOM_DIVIDER,
++  ON_WINDOW_BORDER
+ };
+ 
+ /* Number of bits allocated to store fringe bitmap numbers.  */
+@@ -1246,11 +1247,11 @@
+   ((ROW)->height != (ROW)->visible_height)
+ 
+ #define MR_PARTIALLY_VISIBLE_AT_TOP(W, ROW)  \
+-  ((ROW)->y < WINDOW_TAB_LINE_HEIGHT (W) + WINDOW_HEADER_LINE_HEIGHT (W))
++  ((ROW)->y < WINDOW_BORDER_WIDTH (W) + WINDOW_TAB_LINE_HEIGHT (W) + WINDOW_HEADER_LINE_HEIGHT (W))
+ 
+ #define MR_PARTIALLY_VISIBLE_AT_BOTTOM(W, ROW)  \
+   (((ROW)->y + (ROW)->height - (ROW)->extra_line_spacing) \
+-   > WINDOW_BOX_HEIGHT_NO_MODE_LINE (W))
++   > WINDOW_Y_BOTTOM_BORDER (W))
+ 
+ /* Non-zero if ROW is not completely visible in window W.  */
+ 
+@@ -1259,8 +1260,6 @@
+    && (MR_PARTIALLY_VISIBLE_AT_TOP (W, ROW)		\
+        || MR_PARTIALLY_VISIBLE_AT_BOTTOM (W, ROW)))
+ 
+-
+-
+ /* Non-zero if ROW is partially visible at the top of window W.  */
+ 
+ #define MATRIX_ROW_PARTIALLY_VISIBLE_AT_TOP_P(W, ROW)		\
+@@ -1961,6 +1960,7 @@
+   WINDOW_DIVIDER_FACE_ID,
+   WINDOW_DIVIDER_FIRST_PIXEL_FACE_ID,
+   WINDOW_DIVIDER_LAST_PIXEL_FACE_ID,
++  WINDOW_BORDER_FACE_ID,
+   INTERNAL_BORDER_FACE_ID,
+   CHILD_FRAME_BORDER_FACE_ID,
+   TAB_BAR_FACE_ID,
+@@ -3155,13 +3155,21 @@
+ 			      enum text_cursor_kinds cursor_type,
+ 			      int cursor_width, bool on_p, bool active_p);
+ 
+-  /* Draw vertical border for window W from (X,Y_0) to (X,Y_1).  */
++  /* Draw vertical border for window W from (X, Y0) to (X, Y1).  */
+   void (*draw_vertical_window_border) (struct window *w,
+-                                       int x, int y_0, int y_1);
++                                       int x, int y0, int y1);
+ 
+-  /* Draw window divider for window W from (X_0, Y_0) to (X_1, ,Y_1).  */
++  /* Draw window divider for window W from (X0, Y0) to (X1,Y1).  */
+   void (*draw_window_divider) (struct window *w,
+-			       int x_0, int x_1, int y_0, int y_1);
++			       int x0, int x1, int y0, int y1);
++
++  /* Draw at origin X, Y. */
++  void (*draw_rectangular_frame) (struct frame *f, unsigned long color,
++				  int x, int y, int width, int height, int thickness);
++
++  /* Clear at origin X, Y. */
++  void (*clear_rectangular_frame) (struct frame *f, int x, int y,
++				   int width, int height, int thickness);
+ 
+   /* Shift display of frame F to make room for inserted glyphs.
+      The area at pixel (X,Y) of width WIDTH and height HEIGHT is
+@@ -3639,6 +3647,7 @@
+ extern void gui_clear_cursor (struct window *);
+ extern void gui_draw_vertical_border (struct window *w);
+ extern void gui_draw_right_divider (struct window *w);
++extern void gui_update_window_border (struct window *w);
+ 
+ extern int get_glyph_string_clip_rects (struct glyph_string *,
+                                         NativeRectangle *, int);
+--- a/src/dispnew.c
++++ b/src/dispnew.c
+@@ -764,8 +764,8 @@
+   eassert (start >= 0 && start < matrix->nrows);
+   eassert (end >= 0 && end <= matrix->nrows);
+ 
+-  min_y = WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
+-  max_y = WINDOW_BOX_HEIGHT_NO_MODE_LINE (w);
++  min_y = WINDOW_BORDER_WIDTH (w) + WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
++  max_y = WINDOW_Y_BOTTOM_BORDER (w);
+ 
+   for (; start < end; ++start)
+     {
+@@ -904,8 +904,8 @@
+ {
+   int min_y, max_y;
+ 
+-  min_y = WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
+-  max_y = WINDOW_BOX_HEIGHT_NO_MODE_LINE (w);
++  min_y = WINDOW_BORDER_WIDTH (w) + WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
++  max_y = WINDOW_Y_BOTTOM_BORDER (w);
+ 
+   clear_glyph_row (row);
+   row->y = y;
+@@ -4568,7 +4568,7 @@
+      that can be scrolled.  */
+   if (tab_line_row && tab_line_row->enabled_p)
+     {
+-      tab_line_row->y = 0;
++      tab_line_row->y = WINDOW_BORDER_WIDTH (w);
+       update_window_line (w, 0, &mouse_face_overwritten_p);
+     }
+ 
+@@ -4577,7 +4577,8 @@
+      that can be scrolled.  */
+   if (header_line_row && header_line_row->enabled_p)
+     {
+-      header_line_row->y = tab_line_row ? CURRENT_TAB_LINE_HEIGHT (w) : 0;
++      header_line_row->y = WINDOW_BORDER_WIDTH (w)
++        + (tab_line_row ? CURRENT_TAB_LINE_HEIGHT (w) : 0);
+       update_window_line (w, tab_line_row ? 1 : 0, &mouse_face_overwritten_p);
+     }
+ 
+@@ -4690,6 +4691,9 @@
+ 	  else
+ 	    gui_draw_vertical_border (w);
+ 	}
++
++      gui_update_window_border (w);
++
+       unblock_input ();
+     }
+ 
+--- a/src/frame.h
++++ b/src/frame.h
+@@ -1040,7 +1040,7 @@
+ #endif
+ 
+ /* True if frame F is still alive (not deleted).  */
+-#define FRAME_LIVE_P(f) ((f)->terminal != 0)
++#define FRAME_LIVE_P(f) (FRAME_TERMINAL(f) != 0)
+ 
+ /* True if frame F is a minibuffer-only frame.  */
+ #define FRAME_MINIBUF_ONLY_P(f) \
+--- a/src/fringe.c
++++ b/src/fringe.c
+@@ -652,8 +652,8 @@
+   /* Clear left fringe if no bitmap to draw or if bitmap doesn't fill
+      the fringe.  */
+   p.bx = -1;
+-  header_line_height = WINDOW_TAB_LINE_HEIGHT (w)
+-		       + WINDOW_HEADER_LINE_HEIGHT (w);
++  header_line_height = WINDOW_BORDER_WIDTH (w) + WINDOW_TAB_LINE_HEIGHT (w) +
++    WINDOW_HEADER_LINE_HEIGHT (w);
+   p.by = WINDOW_TO_FRAME_PIXEL_Y (w, max (header_line_height, row->y));
+   p.ny = row->visible_height;
+   if (left_p)
+@@ -1118,8 +1118,8 @@
+ 	      struct glyph_row *row1;
+ 	      int top_ind_max_y;
+ 
+-	      top_ind_min_y = WINDOW_TAB_LINE_HEIGHT (w)
+-			      + WINDOW_HEADER_LINE_HEIGHT (w);
++	      top_ind_min_y = WINDOW_BORDER_WIDTH (w) + WINDOW_TAB_LINE_HEIGHT (w)
++		+ WINDOW_HEADER_LINE_HEIGHT (w);
+ 	      top_ind_max_y = top_ind_min_y + fb->height;
+ 	      if (top_ind_max_y > yb)
+ 		top_ind_max_y = yb;
+@@ -1176,10 +1176,9 @@
+ 
+ 	      bot_ind_max_y = row->y + row->visible_height;
+ 	      bot_ind_min_y = bot_ind_max_y - fb->height;
+-	      if (bot_ind_min_y < WINDOW_TAB_LINE_HEIGHT (w)
+-				  + WINDOW_HEADER_LINE_HEIGHT (w))
+-		bot_ind_min_y = WINDOW_TAB_LINE_HEIGHT (w)
+-				+ WINDOW_HEADER_LINE_HEIGHT (w);
++	      bot_ind_min_y = max (bot_ind_min_y,
++				   WINDOW_BORDER_WIDTH (w) + WINDOW_TAB_LINE_HEIGHT (w)
++				   + WINDOW_HEADER_LINE_HEIGHT (w));
+ 
+ 	      for (y = row->y, rn = bot_ind_rn - 1;
+ 		   y >= bot_ind_min_y && rn >= 0;
+--- a/src/haikuterm.c
++++ b/src/haikuterm.c
+@@ -3153,6 +3153,8 @@
+     haiku_draw_window_cursor,
+     haiku_draw_vertical_window_border,
+     haiku_draw_window_divider,
++    NULL, /* draw rectangular frame */
++    NULL, /* clear rectangular frame */
+     NULL, /* shift glyphs for insert */
+     haiku_show_hourglass,
+     haiku_hide_hourglass,
+--- a/src/keyboard.c
++++ b/src/keyboard.c
+@@ -5880,7 +5880,7 @@
+       if (part == ON_TEXT)
+ 	{
+ 	  xret = mx - window_box_left (w, TEXT_AREA);
+-	  yret = wy - WINDOW_TAB_LINE_HEIGHT (w) - WINDOW_HEADER_LINE_HEIGHT (w);
++	  yret = wy - WINDOW_BORDER_WIDTH (w) - WINDOW_TAB_LINE_HEIGHT (w) - WINDOW_HEADER_LINE_HEIGHT (w);
+ 	}
+       /* For mode line and header line clicks, return X, Y relative to
+ 	 the left window edge.  Use mode_line_string to look for a
+@@ -5924,7 +5924,7 @@
+ 	  if (STRINGP (string))
+ 	    string_info = Fcons (string, make_fixnum (charpos));
+ 	  xret = wx;
+-	  yret = wy - WINDOW_TAB_LINE_HEIGHT (w) - WINDOW_HEADER_LINE_HEIGHT (w);
++	  yret = wy - WINDOW_BORDER_WIDTH (w) - WINDOW_TAB_LINE_HEIGHT (w) - WINDOW_HEADER_LINE_HEIGHT (w);
+ 	}
+       else if (part == ON_LEFT_FRINGE)
+ 	{
+@@ -5934,7 +5934,7 @@
+ 	  dx = wx
+ 	    - (WINDOW_HAS_FRINGES_OUTSIDE_MARGINS (w)
+ 	       ? 0 : window_box_width (w, LEFT_MARGIN_AREA));
+-	  dy = yret = wy - WINDOW_TAB_LINE_HEIGHT (w) - WINDOW_HEADER_LINE_HEIGHT (w);
++	  dy = yret = wy - WINDOW_BORDER_WIDTH (w) - WINDOW_TAB_LINE_HEIGHT (w) - WINDOW_HEADER_LINE_HEIGHT (w);
+ 	}
+       else if (part == ON_RIGHT_FRINGE)
+ 	{
+@@ -5947,7 +5947,7 @@
+ 	    - (WINDOW_HAS_FRINGES_OUTSIDE_MARGINS (w)
+ 	       ? window_box_width (w, RIGHT_MARGIN_AREA)
+ 	       : 0);
+-	  dy = yret = wy - WINDOW_TAB_LINE_HEIGHT (w) - WINDOW_HEADER_LINE_HEIGHT (w);
++	  dy = yret = wy - WINDOW_BORDER_WIDTH (w) - WINDOW_TAB_LINE_HEIGHT (w) - WINDOW_HEADER_LINE_HEIGHT (w);
+ 	}
+       else if (part == ON_VERTICAL_BORDER)
+ 	{
+@@ -5985,6 +5985,13 @@
+ 	  dx = xret = wx;
+ 	  dy = yret = wy;
+ 	}
++      else if (part == ON_WINDOW_BORDER)
++	{
++	  posn = Qwindow_border;
++	  width = WINDOW_BORDER_WIDTH (w);
++	  dx = xret = wx;
++	  dy = yret = wy;
++	}
+ 
+       /* For clicks in the text area, fringes, margins, or vertical
+ 	 scroll bar, call buffer_posn_from_coords to extract TEXTPOS,
+@@ -13519,6 +13526,7 @@
+   DEFSYM (Qvertical_line, "vertical-line");
+   DEFSYM (Qright_divider, "right-divider");
+   DEFSYM (Qbottom_divider, "bottom-divider");
++  DEFSYM (Qwindow_border, "window-border");
+ 
+   DEFSYM (Qmouse_fixup_help_message, "mouse-fixup-help-message");
+ 
+--- a/src/menu.c
++++ b/src/menu.c
+@@ -1256,6 +1256,7 @@
+ 	       area, see keyboard.c:make_lispy_position.  */
+ 	    xpos = window_box_left (win, TEXT_AREA);
+ 	    ypos = (WINDOW_TOP_EDGE_Y (win)
++		    + WINDOW_BORDER_WIDTH (win)
+ 		    + WINDOW_TAB_LINE_HEIGHT (win)
+ 		    + WINDOW_HEADER_LINE_HEIGHT (win));
+ 	  }
+@@ -1572,9 +1573,7 @@
+       f = XFRAME (WINDOW_FRAME (XWINDOW (window)));
+     }
+   else
+-    /* ??? Not really clean; should be CHECK_WINDOW_OR_FRAME,
+-       but I don't want to make one now.  */
+-    CHECK_WINDOW (window);
++    return Qnil;
+ 
+   /* Note that xw_popup_dialog can call menu code, so
+      Vmenu_updating_frame should be set (Bug#17891).  */
+--- a/src/nsterm.m
++++ b/src/nsterm.m
+@@ -5803,6 +5803,8 @@
+   ns_draw_window_cursor,
+   ns_draw_vertical_window_border,
+   ns_draw_window_divider,
++  NULL, /* draw rectangular frame */
++  NULL, /* clear rectangular frame */
+   ns_shift_glyphs_for_insert,
+   ns_show_hourglass,
+   ns_hide_hourglass,
+--- a/src/w32fns.c
++++ b/src/w32fns.c
+@@ -5060,12 +5060,15 @@
+ 
+ 	  form.rcArea.left = WINDOW_TEXT_TO_FRAME_PIXEL_X (w, 0);
+ 	  form.rcArea.top = (WINDOW_TOP_EDGE_Y (w)
++			     + WINDOW_BORDER_WIDTH (w)
+ 			     + w32_system_caret_hdr_height);
+ 	  form.rcArea.right = (WINDOW_BOX_RIGHT_EDGE_X (w)
+ 			       - WINDOW_RIGHT_MARGIN_WIDTH (w)
+-			       - WINDOW_RIGHT_FRINGE_WIDTH (w));
++			       - WINDOW_RIGHT_FRINGE_WIDTH (w)
++			       - WINDOW_BORDER_WIDTH (w));
+ 	  form.rcArea.bottom = (WINDOW_BOTTOM_EDGE_Y (w)
+ 				- WINDOW_BOTTOM_DIVIDER_WIDTH (w)
++				- WINDOW_BORDER_WIDTH (w)
+ 				- w32_system_caret_mode_height);
+ 
+ 	  /* Punt if the window was deleted behind our back.  */
+--- a/src/w32term.c
++++ b/src/w32term.c
+@@ -6678,7 +6678,7 @@
+ 	    = (WINDOW_TO_FRAME_PIXEL_Y (w, w->phys_cursor.y)
+ 	       + glyph_row->ascent - w->phys_cursor_ascent);
+ 	  w32_system_caret_window = w;
+-	  w32_system_caret_hdr_height = WINDOW_TAB_LINE_HEIGHT (w)
++	  w32_system_caret_hdr_height = WINDOW_BORDER_WIDTH (w) + WINDOW_TAB_LINE_HEIGHT (w)
+ 	    + WINDOW_HEADER_LINE_HEIGHT (w);
+ 	  w32_system_caret_mode_height = WINDOW_MODE_LINE_HEIGHT (w);
+ 
+@@ -7928,6 +7928,8 @@
+   w32_draw_window_cursor,
+   w32_draw_vertical_window_border,
+   w32_draw_window_divider,
++  NULL, /* draw rectangular frame */
++  NULL, /* clear rectangular frame */
+   w32_shift_glyphs_for_insert,
+   w32_show_hourglass,
+   w32_hide_hourglass,
+--- a/src/window.c
++++ b/src/window.c
+@@ -109,6 +109,8 @@
+ /* Non-nil means it is the window containing the last mouse movement.  */
+ Lisp_Object last_mouse_window;
+ 
++int window_border_width;
++
+ /* Incremented for each window created.  */
+ static EMACS_INT sequence_number;
+ 
+@@ -1062,7 +1064,8 @@
+ 		   ? WINDOW_SCROLL_BAR_AREA_HEIGHT (w)
+ 		   : 0)
+ 		- WINDOW_MODE_LINE_HEIGHT (w)
+-		- WINDOW_BOTTOM_DIVIDER_WIDTH (w));
++		- WINDOW_BOTTOM_DIVIDER_WIDTH (w)
++		- 2 * WINDOW_BORDER_WIDTH (w));
+ 
+   int denom = 1;
+   if (pixelwise == WINDOW_BODY_IN_REMAPPED_CHARS)
+@@ -1108,7 +1111,8 @@
+ 		- WINDOW_MARGINS_WIDTH (w)
+ 		- (FRAME_WINDOW_P (f)
+ 		   ? WINDOW_FRINGES_WIDTH (w)
+-		   : 0));
++		   : 0)
++	       - 2 * WINDOW_BORDER_WIDTH (w));
+ 
+   int denom = 1;
+   if (pixelwise == WINDOW_BODY_IN_REMAPPED_CHARS)
+@@ -1330,6 +1334,7 @@
+       ON_RIGHT_DIVIDER;
+    if it is on the window's horizontal divider, return
+       ON_BOTTOM_DIVIDER;
++   if it is on the window's border, return ON_WINDOW_BORDER;
+    if it is in the window's text area, return ON_TEXT;
+    if it is on the window's modeline, return ON_MODE_LINE;
+    if it is on the border between the window and its right sibling,
+@@ -1363,6 +1368,24 @@
+   if (y < top_y || y >= bottom_y || x < left_x || x >= right_x)
+     return ON_NOTHING;
+ 
++  /* Top border */
++  if (y >= top_y && y < top_y + WINDOW_BORDER_WIDTH (w)
++      && x >= left_x && x < right_x)
++    return ON_WINDOW_BORDER;
++  /* Bottom border */
++  if (y >= top_y + WINDOW_Y_BOTTOM_BORDER (w)
++      && y < top_y + WINDOW_Y_BOTTOM_BORDER (w) + WINDOW_BORDER_WIDTH (w)
++      && x >= left_x && x < right_x)
++    return ON_WINDOW_BORDER;
++  /* Left border */
++  if (x >= left_x && x < left_x + WINDOW_BORDER_WIDTH (w)
++      && y >= top_y && y < top_y + WINDOW_Y_BOTTOM_BORDER (w))
++    return ON_WINDOW_BORDER;
++  /* Right border */
++  if (x >= right_x - WINDOW_BORDER_WIDTH (w) && x < right_x
++      && y >= top_y && y < top_y + WINDOW_Y_BOTTOM_BORDER (w))
++    return ON_WINDOW_BORDER;
++
+   /* On the horizontal window divider (which prevails the vertical
+      divider)?  */
+   if (WINDOW_BOTTOM_DIVIDER_WIDTH (w) > 0
+@@ -1523,6 +1546,9 @@
+ 	      + ((WINDOW_HAS_FRINGES_OUTSIDE_MARGINS (w))
+ 		 ? WINDOW_RIGHT_FRINGE_WIDTH (w) : 0));
+ 
++    case ON_WINDOW_BORDER:
++      return x - left_x;
++
+     case ON_NOTHING:
+     case ON_VERTICAL_BORDER:
+     case ON_VERTICAL_SCROLL_BAR:
+@@ -1549,6 +1575,7 @@
+    the coordinates relative to the window are returned.
+ If they are in the bottom divider of WINDOW, `bottom-divider' is returned.
+ If they are in the right divider of WINDOW, `right-divider' is returned.
++If they are in the window border of WINDOW, `window-border' is returned.
+ If they are in the mode line of WINDOW, `mode-line' is returned.
+ If they are in the header line of WINDOW, `header-line' is returned.
+ If they are in the tab line of WINDOW, `tab-line' is returned.
+@@ -1625,6 +1652,9 @@
+     case ON_BOTTOM_DIVIDER:
+       return Qbottom_divider;
+ 
++    case ON_WINDOW_BORDER:
++      return Qwindow_border;
++
+     default:
+       emacs_abort ();
+     }
+@@ -2117,13 +2147,14 @@
+   if (EQ (line, Qmode_line))
+     {
+       row = MATRIX_MODE_LINE_ROW (w->current_matrix);
+-      return (row->enabled_p ?
+-	      list4i (row->height,
+-		      0, /* not accurate */
+-		      (WINDOW_TAB_LINE_HEIGHT (w)
+-		       + WINDOW_HEADER_LINE_HEIGHT (w)
+-		       + window_text_bottom_y (w)),
+-		      0)
++      return (row->enabled_p
++	      ? list4i (row->height,
++			0, /* not accurate */
++			(WINDOW_BORDER_WIDTH (w)
++			 + WINDOW_TAB_LINE_HEIGHT (w)
++			 + WINDOW_HEADER_LINE_HEIGHT (w)
++			 + window_text_bottom_y (w)),
++			0)
+ 	      : Qnil);
+     }
+ 
+@@ -2208,9 +2239,7 @@
+   Lisp_Object rows = Qnil;
+   int window_width = NILP (body)
+     ? w->pixel_width : window_body_width (w, WINDOW_BODY_IN_PIXELS);
+-  int tab_line_height = WINDOW_TAB_LINE_HEIGHT (w);
+-  int header_line_height = WINDOW_HEADER_LINE_HEIGHT (w);
+-  int subtract = NILP (body) ? 0 : (tab_line_height + header_line_height);
++  int subtract = NILP (body) ? 0 : (WINDOW_BORDER_WIDTH (w) + WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w));
+   bool invert = !NILP (inverse);
+   bool left_flag = !NILP (left);
+ 
+@@ -4814,12 +4843,16 @@
+ static void
+ window_resize_apply (struct window *w, bool horflag)
+ {
+-  struct window *c;
+   int edge;
+   int unit = (horflag
+ 	      ? FRAME_COLUMN_WIDTH (WINDOW_XFRAME (w))
+ 	      : FRAME_LINE_HEIGHT (WINDOW_XFRAME (w)));
+ 
++  Lisp_Object restore_selected_window = selected_window;
++  selected_window = Qnil; /* force gui_update_window_border to clear */
++  gui_update_window_border (w);
++  selected_window = restore_selected_window;
++
+   /* Note: Assigning new_normal requires that the new total size of the
+      parent window has been set *before*.  */
+   if (horflag)
+@@ -4842,9 +4875,8 @@
+     }
+ 
+   if (WINDOW_VERTICAL_COMBINATION_P (w))
+-    /* W is a vertical combination.  */
+     {
+-      c = XWINDOW (w->contents);
++      struct window *c = XWINDOW (w->contents);
+       while (c)
+ 	{
+ 	  if (horflag)
+@@ -4865,9 +4897,8 @@
+ 	}
+     }
+   else if (WINDOW_HORIZONTAL_COMBINATION_P (w))
+-    /* W is a horizontal combination.  */
+     {
+-      c = XWINDOW (w->contents);
++      struct window *c = XWINDOW (w->contents);
+       while (c)
+ 	{
+ 	  if (horflag)
+@@ -6629,8 +6660,10 @@
+ 	move_it_to (&it, PT, -1, -1, -1, MOVE_TO_POS);
+       if (IT_CHARPOS (it) == PT
+ 	  && it.current_y >= this_scroll_margin
+-	  && it.current_y <= last_y - WINDOW_TAB_LINE_HEIGHT (w)
+-				    - WINDOW_HEADER_LINE_HEIGHT (w)
++	  && it.current_y <= (last_y
++			      - WINDOW_BORDER_WIDTH (w)
++			      - WINDOW_TAB_LINE_HEIGHT (w)
++			      - WINDOW_HEADER_LINE_HEIGHT (w))
+ 	  && (NILP (Vscroll_preserve_screen_position)
+ 	      || EQ (Vscroll_preserve_screen_position, Qt)))
+ 	/* We found PT at a legitimate height.  Leave it alone.  */
+@@ -6646,7 +6679,7 @@
+ 		 is necessary because we set it.current_y to 0, above.  */
+ 	      move_it_to (&it, -1,
+ 			  window_scroll_pixel_based_preserve_x,
+-			  goal_y - WINDOW_TAB_LINE_HEIGHT (w)
++			  goal_y - WINDOW_BORDER_WIDTH (w) - WINDOW_TAB_LINE_HEIGHT (w)
+ 				 - WINDOW_HEADER_LINE_HEIGHT (w),
+ 			  -1, MOVE_TO_Y | MOVE_TO_X);
+ 	    }
+@@ -6683,7 +6716,7 @@
+ 		  /* We subtract WINDOW_HEADER_LINE_HEIGHT because
+ 		     it.y is relative to the bottom of the header
+ 		     line, see above.  */
+-		  (it.last_visible_y - WINDOW_TAB_LINE_HEIGHT (w)
++		  (it.last_visible_y - WINDOW_BORDER_WIDTH (w) - WINDOW_TAB_LINE_HEIGHT (w)
+ 				     - WINDOW_HEADER_LINE_HEIGHT (w)
+ 		   - partial_line_height (&it) - this_scroll_margin - 1),
+ 		  -1,
+@@ -6723,14 +6756,14 @@
+       if (it.what == IT_EOB)
+ 	partial_p =
+ 	  it.current_y + it.ascent + it.descent
+-	  > it.last_visible_y - this_scroll_margin
++	  > it.last_visible_y - this_scroll_margin - WINDOW_BORDER_WIDTH (w)
+ 	  - WINDOW_TAB_LINE_HEIGHT (w) - WINDOW_HEADER_LINE_HEIGHT (w);
+       else
+ 	{
+ 	  move_it_by_lines (&it, 1);
+ 	  partial_p =
+ 	    it.current_y
+-	    > it.last_visible_y - this_scroll_margin
++	    > it.last_visible_y - this_scroll_margin - WINDOW_BORDER_WIDTH (w)
+ 	      - WINDOW_TAB_LINE_HEIGHT (w) - WINDOW_HEADER_LINE_HEIGHT (w);
+ 	}
+ 
+@@ -8734,6 +8767,30 @@
+ 
+ 
+ /***********************************************************************
++			    Borders
++ ***********************************************************************/
++
++DEFUN ("window-border--primitive", Fwindow_border__primitive,
++       Swindow_border__primitive, 1, 1, 0,
++       doc: /* Activate window borders.  */)
++  (Lisp_Object width)
++{
++  bool window_border_mode_p
++    = !NILP (find_symbol_value (Qwindow_border_mode));
++  CHECK_FIXNAT (width);
++  if (XFIXNAT (width) > INT_MAX)
++    args_out_of_range (width, make_fixnum (INT_MAX));
++  window_border_width = XFIXNAT (width);
++  /* Enforce consistency */
++  if ((bool) window_border_width != window_border_mode_p)
++    set_internal (Qwindow_border_mode,
++		  window_border_width ? Qt : Qnil,
++		  Qnil, SET_INTERNAL_SET);
++  return find_symbol_value (Qwindow_border_mode);
++}
++
++
++/***********************************************************************
+ 			    Scroll bars
+  ***********************************************************************/
+ 
+@@ -8791,6 +8848,7 @@
+ 
+       /* Don't change anything if new scroll bar won't fit.  */
+       if ((WINDOW_PIXEL_HEIGHT (w)
++	   - 2 * WINDOW_BORDER_WIDTH (w)
+ 	   - WINDOW_TAB_LINE_HEIGHT (w)
+ 	   - WINDOW_HEADER_LINE_HEIGHT (w)
+ 	   - WINDOW_MODE_LINE_HEIGHT (w)
+@@ -9233,6 +9291,7 @@
+   DEFSYM (Qdedicated, "dedicated");
+   DEFSYM (Qquit_restore, "quit-restore");
+   DEFSYM (Qquit_restore_prev, "quit-restore-prev");
++  DEFSYM (Qwindow_border_mode, "window-border-mode");
+ 
+   DEFVAR_LISP ("temp-buffer-show-function", Vtemp_buffer_show_function,
+ 	       doc: /* Non-nil means call as function to display a help buffer.
+@@ -9708,4 +9767,5 @@
+   defsubr (&Swindow_cursor_type);
+   defsubr (&Swindow_cursor_info);
+   defsubr (&Sset_window_cursor_type);
++  defsubr (&Swindow_border__primitive);
+ }
+--- a/src/window.h
++++ b/src/window.h
+@@ -575,26 +575,25 @@
+ 
+ /* General window layout:
+ 
+-   LEFT_EDGE_COL         RIGHT_EDGE_COL
+-   |                                  |
+-   |                                  |
+-   |  BOX_LEFT_EDGE_COL               |
+-   |  |           BOX_RIGHT_EDGE_COL  |
+-   |  |                            |  |
+-   v  v                            v  v
+-   <-><-><---><-----------><---><-><->
+-    ^  ^   ^        ^        ^   ^  ^
+-    |  |   |        |        |   |  |
+-    |  |   |        |        |   |  +-- RIGHT_SCROLL_BAR_COLS
+-    |  |   |        |        |   +----- RIGHT_FRINGE_WIDTH
+-    |  |   |        |        +--------- RIGHT_MARGIN_COLS
+-    |  |   |        |
+-    |  |   |        +------------------ TEXT_AREA_COLS
+-    |  |   |
+-    |  |   +--------------------------- LEFT_MARGIN_COLS
+-    |  +------------------------------- LEFT_FRINGE_WIDTH
+-    +---------------------------------- LEFT_SCROLL_BAR_COLS
+-
++   LEFT_EDGE_COL                RIGHT_EDGE_COL
++   |     BOX_LEFT_EDGE_COL                  |
++   |     |           BOX_RIGHT_EDGE_COL     |
++   |     |                            |     |
++   v     v                            v     v
++   <-><-><-><---><-----------><---><-><-><->
++    ^  ^  ^   ^        ^        ^   ^  ^  ^
++    |  |  |   |        |        |   |  |  |
++    |  |  |   |        |        |   |  |  |
++    |  |  |   |        |        |   |  |  +- WINDOW_BORDER_WIDTH
++    |  |  |   |        |        |   |  +---- RIGHT_SCROLL_BAR_COLS
++    |  |  |   |        |        |   +------- RIGHT_FRINGE_WIDTH
++    |  |  |   |        |        +----------- RIGHT_MARGIN_COLS
++    |  |  |   |        |
++    |  |  |   |        +-------------------- TEXT_AREA_COLS
++    |  |  |   +----------------------------- LEFT_MARGIN_COLS
++    |  |  +--------------------------------- LEFT_FRINGE_WIDTH
++    |  +------------------------------------ LEFT_SCROLL_BAR_COLS
++    +--------------------------------------- WINDOW_BORDER_WIDTH
+ */
+ 
+ 
+@@ -644,11 +643,11 @@
+   FRAME_LINE_HEIGHT (WINDOW_XFRAME (W))
+ 
+ /* Return the pixel width of window W.  This includes dividers, scroll
+-   bars, fringes and margins, if any.  */
++   bars, fringes, borders, and margins, if any.  */
+ #define WINDOW_PIXEL_WIDTH(W) (W)->pixel_width
+ 
+ /* Return the pixel height of window W.  This includes dividers, scroll
+-   bars, header and mode lines, if any.  */
++   bars, borders, header and mode lines, if any.  */
+ #define WINDOW_PIXEL_HEIGHT(W) (W)->pixel_height
+ 
+ /* Return the width of window W in canonical column units.  This
+@@ -800,9 +799,9 @@
+    + WINDOW_TOP_PIXEL_EDGE (W))
+ 
+ /* Return the frame y-position before which window W ends.  */
+-#define WINDOW_BOTTOM_EDGE_Y(W)				   \
+-  (((WINDOW_MENU_BAR_P (W) || WINDOW_TAB_BAR_P (W) || WINDOW_TOOL_BAR_P (W))	   \
+-    ? 0 : FRAME_INTERNAL_BORDER_WIDTH (WINDOW_XFRAME (W))) \
++#define WINDOW_BOTTOM_EDGE_Y(W)						\
++  (((WINDOW_MENU_BAR_P (W) || WINDOW_TAB_BAR_P (W) || WINDOW_TOOL_BAR_P (W)) \
++    ? 0 : FRAME_INTERNAL_BORDER_WIDTH (WINDOW_XFRAME (W)))		\
+    + WINDOW_BOTTOM_PIXEL_EDGE (W))
+ 
+ /* Return the pixel value where the text (or left fringe) in window W
+@@ -868,6 +867,11 @@
+ #define WINDOW_FRINGES_WIDTH(W)		\
+   (WINDOW_LEFT_FRINGE_WIDTH (W) + WINDOW_RIGHT_FRINGE_WIDTH (W))
+ 
++/* An all-caps analogue to blend in with other width define's.  */
++#define WINDOW_BORDER_WIDTH(W)                                \
++  (((W)->mini || (W)->pseudo_window_p                            \
++    || !FRAME_WINDOW_P (WINDOW_XFRAME (W))) ? 0 : window_border_width)
++
+ /* Are fringes outside display margins in window W.  */
+ #define WINDOW_HAS_FRINGES_OUTSIDE_MARGINS(W)	\
+   ((W)->fringes_outside_margins)
+@@ -982,8 +986,8 @@
+    starts.  */
+ #define WINDOW_SCROLL_BAR_AREA_X(W)		\
+   (WINDOW_HAS_VERTICAL_SCROLL_BAR_ON_RIGHT (W)	\
+-   ? WINDOW_BOX_RIGHT_EDGE_X (W)		\
+-   : WINDOW_LEFT_EDGE_X (W))
++   ? (WINDOW_BOX_RIGHT_EDGE_X (W) - WINDOW_BORDER_WIDTH (W)) \
++   : (WINDOW_LEFT_EDGE_X (W) + WINDOW_BORDER_WIDTH (W)))
+ 
+ /* Height that a scroll bar in window W should have, if there is one.
+    Measured in pixels.  If scroll bars are turned off, this is still
+@@ -1047,28 +1051,27 @@
+ 
+ /* Pixel height of window W without mode line, bottom scroll bar and
+    bottom divider.  */
+-#define WINDOW_BOX_HEIGHT_NO_MODE_LINE(W)	\
++#define WINDOW_Y_BOTTOM_BORDER(W)		\
+   (WINDOW_PIXEL_HEIGHT (W)			\
+    - WINDOW_BOTTOM_DIVIDER_WIDTH (W)		\
++   - WINDOW_MODE_LINE_HEIGHT (W)		\
+    - WINDOW_SCROLL_BAR_AREA_HEIGHT (W)		\
+-   - WINDOW_MODE_LINE_HEIGHT (W))
++   - WINDOW_BORDER_WIDTH (W))
+ 
+ /* Pixel height of window W without mode and header/tab line and bottom
+    divider.  */
+-#define WINDOW_BOX_TEXT_HEIGHT(W)	\
+-  (WINDOW_PIXEL_HEIGHT (W)		\
+-   - WINDOW_BOTTOM_DIVIDER_WIDTH (W)	\
+-   - WINDOW_SCROLL_BAR_AREA_HEIGHT (W)	\
+-   - WINDOW_MODE_LINE_HEIGHT (W)	\
+-   - WINDOW_HEADER_LINE_HEIGHT (W)	\
+-   - WINDOW_TAB_LINE_HEIGHT (W))
++#define WINDOW_BOX_TEXT_HEIGHT(W)		\
++  (WINDOW_Y_BOTTOM_BORDER (W)			\
++   - WINDOW_HEADER_LINE_HEIGHT (W)		\
++   - WINDOW_TAB_LINE_HEIGHT (W)			\
++   - WINDOW_BORDER_WIDTH (W))
+ 
+ /* Return the frame position where the horizontal scroll bar of window W
+    starts.  */
+ #define WINDOW_SCROLL_BAR_AREA_Y(W)			\
+   (WINDOW_TOP_EDGE_Y (W)				\
+    + (WINDOW_HAS_HORIZONTAL_SCROLL_BAR (W)		\
+-      ? WINDOW_BOX_HEIGHT_NO_MODE_LINE (W) : 0))
++      ? WINDOW_Y_BOTTOM_BORDER (W) : 0))
+ 
+ /* Convert window W relative pixel X to frame pixel coordinates.  */
+ #define WINDOW_TO_FRAME_PIXEL_X(W, X)	\
+@@ -1159,6 +1162,12 @@
+ 
+ extern int windows_or_buffers_changed;
+ 
++/* `window-border-width' is a defcustom user setting.  Assigning it to
++   WINDOW_BORDER_WIDTH (defaults to zero) activates the window
++   border.  */
++
++extern int window_border_width;
++
+ /* The main redisplay routine usually only redisplays the selected-window,
+    so when something's changed elsewhere, we call one of the functions below
+    to indicate which other windows might also need to be redisplayed.  */
+--- a/src/xdisp.c
++++ b/src/xdisp.c
+@@ -1252,9 +1252,7 @@
+ 
+ /* Return the bottom boundary y-position for text lines in window W.
+    This is the first y position at which a line cannot start.
+-   It is relative to the top of the window.
+-
+-   This is the height of W minus the height of a mode line, if any.  */
++   It is relative to the top of the window.  */
+ 
+ int
+ window_text_bottom_y (struct window *w)
+@@ -1262,6 +1260,7 @@
+   int height = WINDOW_PIXEL_HEIGHT (w);
+ 
+   height -= WINDOW_BOTTOM_DIVIDER_WIDTH (w);
++  height -= WINDOW_BORDER_WIDTH (w);
+ 
+   if (window_wants_mode_line (w))
+     height -= CURRENT_MODE_LINE_HEIGHT (w);
+@@ -1273,7 +1272,7 @@
+ 
+ /* Return the pixel width of display area AREA of window W.
+    ANY_AREA means return the total width of W, not including
+-   fringes to the left and right of the window.  */
++   the window border and fringes.  */
+ 
+ int
+ window_box_width (struct window *w, enum glyph_row_area area)
+@@ -1284,6 +1283,7 @@
+     {
+       width -= WINDOW_SCROLL_BAR_AREA_WIDTH (w);
+       width -= WINDOW_RIGHT_DIVIDER_WIDTH (w);
++      width -= 2 * WINDOW_BORDER_WIDTH (w);
+ 
+       if (area == TEXT_AREA)
+ 	width -= (WINDOW_MARGINS_WIDTH (w)
+@@ -1313,6 +1313,7 @@
+ 
+   height -= WINDOW_BOTTOM_DIVIDER_WIDTH (w);
+   height -= WINDOW_SCROLL_BAR_AREA_HEIGHT (w);
++  height -= 2 * WINDOW_BORDER_WIDTH (w);
+ 
+   /* Note: the code below that determines the mode-line/header-line/tab-line
+      height is essentially the same as that contained in the macro
+@@ -1378,18 +1379,18 @@
+ }
+ 
+ /* Return the window-relative coordinate of the left edge of display
+-   area AREA of window W.  ANY_AREA means return the left edge of the
+-   whole window, to the right of the left fringe of W.  */
++   area AREA of window W.  ANY_AREA means return the left edge after
++   the window border and left scrollbar.  */
+ 
+ int
+ window_box_left_offset (struct window *w, enum glyph_row_area area)
+ {
+-  int x;
++  int x = WINDOW_BORDER_WIDTH (w);
+ 
+   if (w->pseudo_window_p)
+     return 0;
+ 
+-  x = WINDOW_LEFT_SCROLL_BAR_AREA_WIDTH (w);
++  x += WINDOW_LEFT_SCROLL_BAR_AREA_WIDTH (w);
+ 
+   if (area == TEXT_AREA)
+     x += (WINDOW_LEFT_FRINGE_WIDTH (w)
+@@ -1423,22 +1424,15 @@
+ }
+ 
+ /* Return the frame-relative coordinate of the left edge of display
+-   area AREA of window W.  ANY_AREA means return the left edge of the
+-   whole window, to the right of the left fringe of W.  */
++   area AREA of window W.  */
+ 
+ int
+ window_box_left (struct window *w, enum glyph_row_area area)
+ {
+   struct frame *f = XFRAME (w->frame);
+-  int x;
+-
+-  if (w->pseudo_window_p)
+-    return FRAME_INTERNAL_BORDER_WIDTH (f);
+-
+-  x = (WINDOW_LEFT_EDGE_X (w)
+-       + window_box_left_offset (w, area));
+-
+-  return x;
++  return w->pseudo_window_p
++    ? FRAME_INTERNAL_BORDER_WIDTH (f)
++    : WINDOW_LEFT_EDGE_X (w) + window_box_left_offset (w, area);
+ }
+ 
+ 
+@@ -1471,7 +1465,7 @@
+     *box_x = window_box_left (w, area);
+   if (box_y)
+     {
+-      *box_y = WINDOW_TOP_EDGE_Y (w);
++      *box_y = WINDOW_TOP_EDGE_Y (w) + WINDOW_BORDER_WIDTH (w);
+       if (window_wants_tab_line (w))
+ 	*box_y += CURRENT_TAB_LINE_HEIGHT (w);
+       if (window_wants_header_line (w))
+@@ -1813,7 +1807,8 @@
+ 	 glyph.  */
+       int top_x = it.current_x;
+       int top_y = it.current_y;
+-      int window_top_y = WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
++      int window_top_y = WINDOW_BORDER_WIDTH (w)
++        + WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
+       int bottom_y;
+       struct it save_it;
+       void *save_it_data = NULL;
+@@ -2102,7 +2097,7 @@
+ 			   - it.last_visible_y));
+ 	  *rowh = max (0, (min (it2.current_y + it2.max_ascent + it2.max_descent,
+ 				it.last_visible_y)
+-			   - max (max (it2.current_y,
++			   - max (max (max (it2.current_y, WINDOW_BORDER_WIDTH (w)),
+ 				       WINDOW_TAB_LINE_HEIGHT (w)),
+ 				  WINDOW_HEADER_LINE_HEIGHT (w))));
+ 	  *vpos = it2.vpos;
+@@ -2546,7 +2541,8 @@
+      intentionally draws over other lines.  */
+   if (s->for_overlaps)
+     {
+-      r.y = WINDOW_TAB_LINE_HEIGHT (s->w) + WINDOW_HEADER_LINE_HEIGHT (s->w);
++      r.y = WINDOW_BORDER_WIDTH (s->w) + WINDOW_TAB_LINE_HEIGHT (s->w) +
++	WINDOW_HEADER_LINE_HEIGHT (s->w);
+       r.height = window_text_bottom_y (s->w) - r.y;
+ 
+       /* Alas, the above simple strategy does not work for the
+@@ -2573,7 +2569,8 @@
+ 	 partially visible lines at the top of a window.  */
+       if (!s->row->full_width_p
+ 	  && MATRIX_ROW_PARTIALLY_VISIBLE_AT_TOP_P (s->w, s->row))
+-	r.y = WINDOW_TAB_LINE_HEIGHT (s->w) + WINDOW_HEADER_LINE_HEIGHT (s->w);
++	r.y = WINDOW_BORDER_WIDTH (s->w) + WINDOW_TAB_LINE_HEIGHT (s->w) +
++	  WINDOW_HEADER_LINE_HEIGHT (s->w);
+       else
+ 	r.y = max (0, s->row->y);
+     }
+@@ -2750,7 +2747,7 @@
+   h = min (h, row->height);
+   h0 = min (h0, ascent + glyph->descent);
+ 
+-  y0 = WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
++  y0 = WINDOW_BORDER_WIDTH (w) + WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
+   if (y < y0)
+     {
+       h = max (h - (y0 - y) + 1, h0);
+@@ -2780,7 +2777,7 @@
+ {
+   Lisp_Object window;
+   struct window *w;
+-  struct glyph_row *r, *gr, *end_row;
++  struct glyph_row *r, *gr = NULL, *end_row;
+   enum window_part part;
+   enum glyph_row_area area;
+   int x, y, width, height;
+@@ -2839,13 +2836,18 @@
+       goto text_glyph;
+ 
+     case ON_TAB_LINE:
++      if (!gr)
++	gr = MATRIX_TAB_LINE_ROW (w->current_matrix);
++      FALLTHROUGH;
++
+     case ON_HEADER_LINE:
++      if (!gr)
++	gr = MATRIX_HEADER_LINE_ROW (w->current_matrix);
++      FALLTHROUGH;
++
+     case ON_MODE_LINE:
+-      gr = (part == ON_TAB_LINE
+-	    ? MATRIX_TAB_LINE_ROW (w->current_matrix)
+-	    : (part == ON_HEADER_LINE
+-	       ? MATRIX_HEADER_LINE_ROW (w->current_matrix)
+-	       : MATRIX_MODE_LINE_ROW (w->current_matrix)));
++      if (!gr)
++	gr = MATRIX_MODE_LINE_ROW (w->current_matrix);
+       gy = gr->y;
+       area = TEXT_AREA;
+       goto text_glyph_row_found;
+@@ -2891,14 +2893,15 @@
+ 	      gx += (x / width) * width;
+ 	    }
+ 
+-	  if (part != ON_MODE_LINE && part != ON_HEADER_LINE
++	  if (part != ON_MODE_LINE
++	      && part != ON_HEADER_LINE
+ 	      && part != ON_TAB_LINE)
+ 	    {
+ 	      gx += window_box_left_offset (w, area);
+ 	      /* Don't expand over the modeline to make sure the vertical
+ 		 drag cursor is shown early enough.  */
+ 	      height = min (height,
+-			    max (0, WINDOW_BOX_HEIGHT_NO_MODE_LINE (w) - gy));
++			    max (0, WINDOW_Y_BOTTOM_BORDER (w) - gy));
+ 	    }
+ 	}
+       else
+@@ -2907,11 +2910,12 @@
+ 	  gx = (x / width) * width;
+ 	  y -= gy;
+ 	  gy += (y / height) * height;
+-	  if (part != ON_MODE_LINE && part != ON_HEADER_LINE
++	  if (part != ON_MODE_LINE
++	      && part != ON_HEADER_LINE
+ 	      && part != ON_TAB_LINE)
+ 	    /* See comment above.  */
+ 	    height = min (height,
+-			  max (0, WINDOW_BOX_HEIGHT_NO_MODE_LINE (w) - gy));
++			  max (0, WINDOW_Y_BOTTOM_BORDER (w) - gy));
+ 	}
+       break;
+ 
+@@ -2987,6 +2991,11 @@
+       height = WINDOW_BOTTOM_DIVIDER_WIDTH (w);
+       goto add_edge;
+ 
++    case ON_WINDOW_BORDER:
++      gx = gy = 0;
++      width = height = WINDOW_BORDER_WIDTH (w);
++      goto add_edge;
++
+     default:
+       ;
+     virtual_glyph:
+@@ -3255,7 +3264,7 @@
+ 	       struct glyph_row *row, enum face_id base_face_id)
+ {
+   enum face_id remapped_base_face_id = base_face_id;
+-  int body_width = 0, body_height = 0;
++  int body_height = 0;
+ 
+   /* Some precondition checks.  */
+   eassert (w != NULL && it != NULL);
+@@ -3500,7 +3509,7 @@
+ 	it->first_visible_x =
+ 	  window_hscroll_limited (w, it->f) * FRAME_COLUMN_WIDTH (it->f);
+ 
+-      body_width = window_box_width (w, TEXT_AREA);
++      int body_width = window_box_width (w, TEXT_AREA);
+       if (!w->pseudo_window_p && !MINI_WINDOW_P (w)
+ 	  && body_width != w->old_body_pixel_width)
+ 	FRAME_WINDOW_CHANGE (it->f) = true;
+@@ -3519,7 +3528,8 @@
+ 
+       it->tab_line_p = window_wants_tab_line (w);
+       it->header_line_p = window_wants_header_line (w);
+-      body_height = WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
++      body_height = WINDOW_BORDER_WIDTH (w)
++        + WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
+       it->current_y =  body_height + w->vscroll;
+     }
+ 
+@@ -3534,24 +3544,18 @@
+       && body_height != w->old_body_pixel_height)
+     FRAME_WINDOW_CHANGE (it->f) = true;
+ 
+-  /* For mode lines and alike, arrange for the first glyph having a
+-     left box line if the face specifies a box.  */
++  /* If we have a boxed mode line, make the first character appear
++     with a left box line.  */
+   if (base_face_id != DEFAULT_FACE_ID)
+     {
+-      struct face *face;
+-
+       it->face_id = remapped_base_face_id;
+-
+-      /* If we have a boxed mode line, make the first character appear
+-	 with a left box line.  */
+-      face = FACE_FROM_ID_OR_NULL (it->f, remapped_base_face_id);
++      struct face *face = FACE_FROM_ID_OR_NULL (it->f, it->face_id);
+       if (face && face->box != FACE_NO_BOX)
+ 	{
+ 	  int box_thickness = face->box_vertical_line_width;
+ 	  it->face_box_p = true;
+ 	  it->start_of_box_run_p = true;
+-	  /* Make sure we will have enough horizontal space to add the
+-	     right box line at the end.  */
++	  /* Ensure enough space at end for right box line.  */
+ 	  if (box_thickness > 0)
+ 	    it->last_visible_x -= box_thickness;
+ 	}
+@@ -11998,11 +12002,12 @@
+   /* Subtract height of header-line and tab-line which was counted
+      automatically by start_display.  */
+   if (!NILP (ignore_line_at_end))
+-    y = (it.current_y + doff
++    y = (it.current_y + doff - WINDOW_BORDER_WIDTH (w)
+ 	 - WINDOW_TAB_LINE_HEIGHT (w)
+ 	 - WINDOW_HEADER_LINE_HEIGHT (w));
+   else
+     y = (it.current_y + it.max_ascent + it.max_descent + doff
++         - WINDOW_BORDER_WIDTH (w)
+ 	 - WINDOW_TAB_LINE_HEIGHT (w) - WINDOW_HEADER_LINE_HEIGHT (w));
+ 
+   /* Don't return more than Y-LIMIT.  */
+@@ -21193,7 +21198,8 @@
+ 		centering_position -= pt_offset;
+ 	      centering_position -=
+ 		(frame_line_height * (1 + margin + last_line_misfit)
+-		 + WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w));
++		 + WINDOW_BORDER_WIDTH (w)
++                 + WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w));
+ 	      /* Don't let point enter the scroll margin near top of
+ 		 the window.  */
+ 	      if (centering_position < margin * frame_line_height)
+@@ -21555,6 +21561,9 @@
+     }
+ 
+ #ifdef HAVE_WINDOW_SYSTEM
++
++  gui_update_window_border (w);
++
+   if (FRAME_WINDOW_P (f)
+       && update_window_fringes (w, (just_this_one_p
+ 				    || (!used_current_matrix_p && !overlay_arrow_seen)
+@@ -21569,6 +21578,7 @@
+ 	  else
+ 	    gui_draw_vertical_border (w);
+ 	}
++
+       unblock_input ();
+       update_end (f);
+     }
+@@ -21582,10 +21592,9 @@
+      We have to redeem the scroll bar even in this case,
+      because the loop in redisplay_internal expects that.  */
+  need_larger_matrices:
+-  ;
++  (void) 0;
+  finish_scroll_bars:
+-
+-   if (WINDOW_HAS_VERTICAL_SCROLL_BAR (w) || WINDOW_HAS_HORIZONTAL_SCROLL_BAR (w))
++  if (WINDOW_HAS_VERTICAL_SCROLL_BAR (w) || WINDOW_HAS_HORIZONTAL_SCROLL_BAR (w))
+     {
+       if (WINDOW_HAS_VERTICAL_SCROLL_BAR (w))
+ 	/* Set the thumb's position and size.  */
+@@ -21598,7 +21607,7 @@
+       /* Note that we actually used the scroll bar attached to this
+ 	 window, so it shouldn't be deleted at the end of redisplay.  */
+       if (FRAME_TERMINAL (f)->redeem_scroll_bar_hook)
+-        (*FRAME_TERMINAL (f)->redeem_scroll_bar_hook) (w);
++	(*FRAME_TERMINAL (f)->redeem_scroll_bar_hook) (w);
+     }
+ 
+   /* Restore current_buffer and value of point in it.  The window
+@@ -21963,7 +21972,8 @@
+ 	    (start_row + i)->enabled_p = false;
+ 
+ 	  /* Re-compute Y positions.  */
+-	  min_y = WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
++	  min_y = WINDOW_BORDER_WIDTH (w) + WINDOW_TAB_LINE_HEIGHT (w) +
++	    WINDOW_HEADER_LINE_HEIGHT (w);
+ 	  max_y = it.last_visible_y;
+ 	  for (row = start_row + nrows_scrolled;
+ 	       row < bottom_row;
+@@ -22070,7 +22080,8 @@
+       it.vpos = (MATRIX_ROW_VPOS (first_row_to_display, w->current_matrix)
+ 		 - nrows_scrolled);
+       it.current_y = (first_row_to_display->y - first_reusable_row->y
+-		      + WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w));
++		      + WINDOW_BORDER_WIDTH (w) + WINDOW_TAB_LINE_HEIGHT (w)
++		      + WINDOW_HEADER_LINE_HEIGHT (w));
+ 
+       /* Display lines beginning with first_row_to_display in the
+          desired matrix.  Set last_text_row to the last row displayed
+@@ -22103,7 +22114,9 @@
+ 
+       /* Scroll the display.  */
+       run.current_y = first_reusable_row->y;
+-      run.desired_y = WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
++      run.desired_y = WINDOW_BORDER_WIDTH (w)
++	+ WINDOW_TAB_LINE_HEIGHT (w)
++	+ WINDOW_HEADER_LINE_HEIGHT (w);
+       run.height = it.last_visible_y - run.current_y;
+       dy = run.current_y - run.desired_y;
+ 
+@@ -22121,7 +22134,8 @@
+ 
+       /* Adjust Y positions of reused rows.  */
+       bottom_row = MATRIX_BOTTOM_TEXT_ROW (w->current_matrix, w);
+-      min_y = WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
++      min_y = WINDOW_BORDER_WIDTH (w) + WINDOW_TAB_LINE_HEIGHT (w) +
++	WINDOW_HEADER_LINE_HEIGHT (w);
+       max_y = it.last_visible_y;
+       for (row = first_reusable_row; row < first_row_to_display; ++row)
+ 	{
+@@ -24091,8 +24105,9 @@
+       /* Compute how much of the line is visible.  */
+       row->visible_height = row->height;
+ 
+-      min_y = WINDOW_TAB_LINE_HEIGHT (it->w) + WINDOW_HEADER_LINE_HEIGHT (it->w);
+-      max_y = WINDOW_BOX_HEIGHT_NO_MODE_LINE (it->w);
++      min_y = WINDOW_BORDER_WIDTH (it->w) + WINDOW_TAB_LINE_HEIGHT (it->w) +
++	WINDOW_HEADER_LINE_HEIGHT (it->w);
++      max_y = WINDOW_Y_BOTTOM_BORDER (it->w);
+ 
+       if (row->y < min_y)
+ 	row->visible_height -= min_y - row->y;
+@@ -27842,7 +27857,7 @@
+       row = it.glyph_row;
+       delta_height
+ 	= ((row->y + row->height)
+-	   - WINDOW_BOX_HEIGHT_NO_MODE_LINE (menu_window));
++	   - WINDOW_Y_BOTTOM_BORDER (menu_window));
+ 
+       if (delta_height != 0)
+         {
+@@ -28178,6 +28193,10 @@
+   push_kboard (FRAME_KBOARD (it.f));
+   record_unwind_save_match_data ();
+ 
++  if (WINDOW_BORDER_WIDTH (w))
++    display_string ("", Qnil, Qnil, 0, 0, &it, DISP_INFINITY, -1,
++		    WINDOW_BORDER_WIDTH (w), 0);
++
+   if (NILP (Vmode_line_compact)
+       || face_id == HEADER_LINE_ACTIVE_FACE_ID
+       || face_id == HEADER_LINE_INACTIVE_FACE_ID
+@@ -30454,7 +30473,7 @@
+ 	  return OK_PIXELS (width_p
+ 			    ? (window_box_width (it->w, TEXT_AREA)
+ 			       - lnum_pixel_width)
+-			    : WINDOW_BOX_HEIGHT_NO_MODE_LINE (it->w));
++			    : WINDOW_Y_BOTTOM_BORDER (it->w));
+ 
+       /* ':align_to'.  First time we compute the value, window
+ 	 elements are interpreted as the position of the element's
+@@ -34518,7 +34537,8 @@
+       to_x += area_left;
+     }
+ 
+-  min_y = WINDOW_TAB_LINE_HEIGHT (w) + WINDOW_HEADER_LINE_HEIGHT (w);
++  min_y = WINDOW_BORDER_WIDTH (w) + WINDOW_TAB_LINE_HEIGHT (w) +
++    WINDOW_HEADER_LINE_HEIGHT (w);
+   from_y = WINDOW_TO_FRAME_PIXEL_Y (w, max (min_y, w->output_cursor.y));
+   to_y = WINDOW_TO_FRAME_PIXEL_Y (w, to_y);
+ 
+@@ -35062,8 +35082,6 @@
+   if (w->phys_cursor_type == HOLLOW_BOX_CURSOR)
+     {
+       int x, y;
+-      int tab_line_height = WINDOW_TAB_LINE_HEIGHT (w);
+-      int header_line_height = WINDOW_HEADER_LINE_HEIGHT (w);
+       int width;
+ 
+       cursor_glyph = get_phys_cursor_glyph (w);
+@@ -35078,7 +35096,7 @@
+ 	  x = 0;
+ 	}
+       width = min (width, window_box_width (w, TEXT_AREA) - x);
+-      y = WINDOW_TO_FRAME_PIXEL_Y (w, max (tab_line_height, max (header_line_height, cursor_row->y)));
++      y = WINDOW_TO_FRAME_PIXEL_Y (w, max (WINDOW_TAB_LINE_HEIGHT (w), max (WINDOW_HEADER_LINE_HEIGHT (w), max(WINDOW_BORDER_WIDTH (w), cursor_row->y))));
+       x = WINDOW_TEXT_TO_FRAME_PIXEL_X (w, x);
+ 
+       if (width > 0)
+@@ -37091,6 +37109,11 @@
+       }
+     else
+       cursor = FRAME_OUTPUT_DATA (f)->nontext_cursor;
++  else if (part == ON_WINDOW_BORDER)
++    {
++      cursor = FRAME_OUTPUT_DATA (f)->nontext_cursor;
++      goto set_cursor;
++    }
+   else if (part == ON_LEFT_FRINGE || part == ON_RIGHT_FRINGE)
+     {
+       cursor = FRAME_OUTPUT_DATA (f)->nontext_cursor;
+@@ -37836,6 +37859,45 @@
+     }
+ }
+ 
++void
++gui_update_window_border (struct window *w)
++{
++  if (w->mini
++      || w->pseudo_window_p
++      || WINDOW_BORDER_WIDTH (w) <= 0)
++    return;
++
++  struct frame *f = XFRAME (WINDOW_FRAME (w));
++  if (FRAMEP (selected_frame)
++      && f == XFRAME (selected_frame)
++      && WINDOWP (selected_window)
++      && w == XWINDOW (selected_window))
++    {
++      if (FRAME_RIF (f)->draw_rectangular_frame)
++	{
++	  struct face *face = FACE_FROM_ID_OR_NULL (f, WINDOW_BORDER_FACE_ID);
++	  unsigned long color = face ? face->foreground : FRAME_FOREGROUND_PIXEL (f);
++	  FRAME_RIF (f)->draw_rectangular_frame
++	    (f, color,
++	     WINDOW_LEFT_EDGE_X (w),
++	     WINDOW_TOP_EDGE_Y (w),
++	     WINDOW_RIGHT_EDGE_X (w) - WINDOW_LEFT_EDGE_X (w),
++	     WINDOW_Y_BOTTOM_BORDER (w),
++	     WINDOW_BORDER_WIDTH (w));
++	}
++    }
++  else if (FRAME_RIF (f)->clear_rectangular_frame)
++    {
++      FRAME_RIF (f)->clear_rectangular_frame
++	(f,
++	 WINDOW_LEFT_EDGE_X (w),
++	 WINDOW_TOP_EDGE_Y (w),
++	 WINDOW_RIGHT_EDGE_X (w) - WINDOW_LEFT_EDGE_X (w),
++	 WINDOW_Y_BOTTOM_BORDER (w),
++	 WINDOW_BORDER_WIDTH (w));
++    }
++}
++
+ /* Redraw the part of window W intersection rectangle FR.  Pixel
+    coordinates in FR are frame-relative.  Call this function with
+    input blocked.  Value is true if the exposure overwrites
+@@ -37987,6 +38049,8 @@
+ 	  if (WINDOW_BOTTOM_DIVIDER_WIDTH (w))
+ 	    gui_draw_bottom_divider (w);
+ 
++	  gui_update_window_border (w);
++
+ 	  /* Turn the cursor on again.  */
+ 	  if (cursor_cleared_p
+ 	      || (phys_cursor_on_p && !w->phys_cursor_on_p))
+--- a/src/xfaces.c
++++ b/src/xfaces.c
+@@ -5209,6 +5209,7 @@
+     case VERTICAL_BORDER_FACE_ID: 	name = Qvertical_border; 	break;
+     case WINDOW_DIVIDER_FIRST_PIXEL_FACE_ID:	name = Qwindow_divider_first_pixel;	break;
+     case WINDOW_DIVIDER_LAST_PIXEL_FACE_ID:	name = Qwindow_divider_last_pixel;	break;
++    case WINDOW_BORDER_FACE_ID:		name = Qwindow_border;		break;
+     case INTERNAL_BORDER_FACE_ID:	name = Qinternal_border; 	break;
+     case CHILD_FRAME_BORDER_FACE_ID:	name = Qchild_frame_border; 	break;
+     case MARGIN_FACE_ID:		name = Qmargin;			break;
+@@ -5974,6 +5975,7 @@
+ 			  WINDOW_DIVIDER_FIRST_PIXEL_FACE_ID);
+       realize_named_face (f, Qwindow_divider_last_pixel,
+ 			  WINDOW_DIVIDER_LAST_PIXEL_FACE_ID);
++      realize_named_face (f, Qwindow_border, WINDOW_BORDER_FACE_ID);
+       realize_named_face (f, Qinternal_border, INTERNAL_BORDER_FACE_ID);
+       realize_named_face (f, Qchild_frame_border, CHILD_FRAME_BORDER_FACE_ID);
+       realize_named_face (f, Qtab_bar, TAB_BAR_FACE_ID);
+@@ -7554,6 +7556,7 @@
+   DEFSYM (Qwindow_divider, "window-divider");
+   DEFSYM (Qwindow_divider_first_pixel, "window-divider-first-pixel");
+   DEFSYM (Qwindow_divider_last_pixel, "window-divider-last-pixel");
++  DEFSYM (Qwindow_border, "window-border");
+   DEFSYM (Qinternal_border, "internal-border");
+   DEFSYM (Qchild_frame_border, "child-frame-border");
+ 
+--- a/src/xterm.c
++++ b/src/xterm.c
+@@ -7527,6 +7527,47 @@
+     }
+ }
+ 
++/* Clear a rectangular border, presumably around a window.  */
++
++static void
++x_clear_rectangular_frame (struct frame *f, int x, int y, int w, int h, int thickness)
++{
++  // top
++  x_clear_rectangle (f, f->output_data.x->normal_gc,
++		     x, y, w, thickness, false);
++  // bottom
++  x_clear_rectangle (f, f->output_data.x->normal_gc,
++		     x, y + h, w, thickness, false);
++  // left
++  x_clear_rectangle (f, f->output_data.x->normal_gc,
++		     x, y, thickness, h, false);
++  // right
++  x_clear_rectangle (f, f->output_data.x->normal_gc,
++		     x + w - thickness, y, thickness, h, false);
++}
++
++/* Draw a rectangular border, presumably around a window.  */
++
++static void
++x_draw_rectangular_frame (struct frame *f, unsigned long color,
++			  int x, int y, int w, int h, int thickness)
++{
++  Display *display = FRAME_X_DISPLAY (f);
++  XSetForeground (display, f->output_data.x->normal_gc, color);
++  // top
++  x_fill_rectangle (f, f->output_data.x->normal_gc,
++		    x, y, w, thickness, false);
++  // bottom
++  x_fill_rectangle (f, f->output_data.x->normal_gc,
++		    x, y + h, w, thickness, false);
++  // left
++  x_fill_rectangle (f, f->output_data.x->normal_gc,
++		    x, y, thickness, h, false);
++  // right
++  x_fill_rectangle (f, f->output_data.x->normal_gc,
++		    x + w - thickness, y, thickness, h, false);
++}
++
+ #ifdef HAVE_XDBE
+ 
+ /* Show the frame back buffer.  If frame is double-buffered,
+@@ -7884,7 +7925,7 @@
+ 	{
+ 	  XSetBackground (display, face->gc, face->background);
+ 	  x_clear_rectangle (f, face->gc, p->bx, p->by, p->nx, p->ny,
+-			   true);
++			     true);
+ 	  XSetForeground (display, face->gc, face->foreground);
+ 	}
+     }
+@@ -11713,30 +11754,25 @@
+ 
+   /* Get frame-relative bounding box of the text display area of W,
+      without mode lines.  Include in this box the left and right
+-     fringe of W.  */
++     fringe of W, but not the window border.  */
+   window_box (w, ANY_AREA, &x, &y, &width, &height);
+ 
+   from_y = WINDOW_TO_FRAME_PIXEL_Y (w, run->current_y);
+   to_y = WINDOW_TO_FRAME_PIXEL_Y (w, run->desired_y);
+   bottom_y = y + height;
+ 
+-  if (to_y < from_y)
++  /* Overstepping doesn't seem to happen in practice, but if so, avoid
++     copying top portion of mode line.  */
++  int run_height = run->height;
++  if (to_y < from_y)  /* Scrolling up (PgDn) */
+     {
+-      /* Scrolling up.  Make sure we don't copy part of the mode
+-	 line at the bottom.  */
+-      if (from_y + run->height > bottom_y)
+-	height = bottom_y - from_y;
+-      else
+-	height = run->height;
++      if (from_y + run_height > bottom_y)
++	run_height = bottom_y - from_y;
+     }
+-  else
++  else /* Scrolling down (PgUp) */
+     {
+-      /* Scrolling down.  Make sure we don't copy over the mode line.
+-	 at the bottom.  */
+-      if (to_y + run->height > bottom_y)
+-	height = bottom_y - to_y;
+-      else
+-	height = run->height;
++      if (to_y + run_height > bottom_y)
++	run_height = bottom_y - to_y;
+     }
+ 
+   block_input ();
+@@ -11770,7 +11806,7 @@
+ 	      r1.x = w->pixel_left;
+ 	      r1.y = from_y;
+ 	      r1.width = w->pixel_width;
+-	      r1.height = height;
++	      r1.height = run_height;
+ 	      r2 = r1;
+ 	      r2.y = window_y;
+ 	      r2.height = window_height;
+@@ -11859,9 +11895,9 @@
+ 		     FRAME_X_DRAWABLE (f), FRAME_X_DRAWABLE (f),
+ 		     f->output_data.x->normal_gc,
+ 		     x, from_y,
+-		     width, height,
++		     width, run_height,
+ 		     x, to_y);
+-	  cairo_surface_mark_dirty_rectangle (surface, x, to_y, width, height);
++	  cairo_surface_mark_dirty_rectangle (surface, x, to_y, width, run_height);
+ 	}
+ #ifdef USE_CAIRO_XCB_SURFACE
+       else if (cairo_surface_get_type (surface) == CAIRO_SURFACE_TYPE_XCB)
+@@ -11871,8 +11907,8 @@
+ 			 (xcb_drawable_t) FRAME_X_DRAWABLE (f),
+ 			 (xcb_drawable_t) FRAME_X_DRAWABLE (f),
+ 			 (xcb_gcontext_t) XGContextFromGC (f->output_data.x->normal_gc),
+-			 x, from_y, x, to_y, width, height);
+-	  cairo_surface_mark_dirty_rectangle (surface, x, to_y, width, height);
++			 x, from_y, x, to_y, width, run_height);
++	  cairo_surface_mark_dirty_rectangle (surface, x, to_y, width, run_height);
+ 	}
+ #endif
+       else
+@@ -11880,7 +11916,7 @@
+ 	  cairo_surface_t *s
+ 	    = cairo_surface_create_similar (surface,
+ 					    cairo_surface_get_content (surface),
+-					    width, height);
++					    width, run_height);
+ 	  cairo_t *cr = cairo_create (s);
+ 	  cairo_set_source_surface (cr, surface, -x, -from_y);
+ 	  cairo_paint (cr);
+@@ -11890,7 +11926,7 @@
+ 	  cairo_save (cr);
+ 	  cairo_set_source_surface (cr, s, x, to_y);
+ 	  cairo_set_operator (cr, CAIRO_OPERATOR_SOURCE);
+-	  cairo_rectangle (cr, x, to_y, width, height);
++	  cairo_rectangle (cr, x, to_y, width, run_height);
+ 	  cairo_fill (cr);
+ 	  cairo_restore (cr);
+ 	  cairo_surface_destroy (s);
+@@ -11902,7 +11938,7 @@
+ 	       FRAME_X_DRAWABLE (f), FRAME_X_DRAWABLE (f),
+ 	       f->output_data.x->normal_gc,
+ 	       x, from_y,
+-	       width, height,
++	       width, run_height,
+ 	       x, to_y);
+ 
+   unblock_input ();
+@@ -32004,6 +32040,8 @@
+     x_draw_window_cursor,
+     x_draw_vertical_window_border,
+     x_draw_window_divider,
++    x_draw_rectangular_frame,
++    x_clear_rectangular_frame,
+     x_shift_glyphs_for_insert, /* Never called; see comment in function.  */
+     x_show_hourglass,
+     x_hide_hourglass,
+--- a/src/pgtkterm.c
++++ b/src/pgtkterm.c
+@@ -3438,6 +3438,36 @@
+   pgtk_end_cr_clip (f);
+ }
+ 
++/* Draw into the same Cairo backing surface as glyphs and dividers.
++   HEIGHT is the offset of the bottom border, not the outer height.  */
++static void
++pgtk_draw_rectangular_frame (struct frame *f, unsigned long color,
++                             int x, int y, int width, int height, int thickness)
++{
++  if (width <= 0 || height <= 0 || thickness <= 0)
++    return;
++  cairo_t *cr = pgtk_begin_cr_clip (f);
++  pgtk_set_cr_source_with_color (f, color, false);
++  cairo_rectangle (cr, x, y, width, thickness);
++  cairo_rectangle (cr, x, y + height, width, thickness);
++  cairo_rectangle (cr, x, y, thickness, height);
++  cairo_rectangle (cr, x + width - thickness, y, thickness, height);
++  cairo_fill (cr);
++  pgtk_end_cr_clip (f);
++}
++
++static void
++pgtk_clear_rectangular_frame (struct frame *f, int x, int y,
++                              int width, int height, int thickness)
++{
++  if (width <= 0 || height <= 0 || thickness <= 0)
++    return;
++  pgtk_clear_area (f, x, y, width, thickness);
++  pgtk_clear_area (f, x, y + height, width, thickness);
++  pgtk_clear_area (f, x, y, thickness, height);
++  pgtk_clear_area (f, x + width - thickness, y, thickness, height);
++}
++
+ /* End update of frame F.  This function is installed as a hook in
+    update_end.  */
+ 
+@@ -3775,6 +3805,8 @@
+   pgtk_draw_window_cursor,
+   pgtk_draw_vertical_window_border,
+   pgtk_draw_window_divider,
++  pgtk_draw_rectangular_frame,
++  pgtk_clear_rectangular_frame,
+   NULL,				/* pgtk_shift_glyphs_for_insert, */
+   pgtk_show_hourglass,
+   pgtk_hide_hourglass,
+@@ -4222,7 +4254,9 @@
+   window_box (w, ANY_AREA, 0, &window_y, 0, &window_height);
+   top = window_y;
+   height = window_height;
+-  left = WINDOW_SCROLL_BAR_AREA_X (w);
++  left = WINDOW_SCROLL_BAR_AREA_X (w)
++    + (WINDOW_HAS_VERTICAL_SCROLL_BAR_ON_RIGHT (w)
++       ? -WINDOW_BORDER_WIDTH (w) : WINDOW_BORDER_WIDTH (w));
+   width = WINDOW_SCROLL_BAR_AREA_WIDTH (w);
+ 
+   /* Does the scroll bar exist yet?  */

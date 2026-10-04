@@ -42,6 +42,31 @@ The overlay deliberately exports a named editor instead of changing every
 Emacs derivation in nixpkgs. It targets GNU Emacs 31; other versions require
 reviewing the C patch against their sources.
 
+* Native selected-window border
+The overlay ports Commercial Emacs's =window-border-mode= into GNU Emacs
+31 and adds a Cairo renderer for PGTK. It reserves space in window geometry
+for the border, including headers, tab lines, scrolling and scroll bars.
+This is a C redisplay feature; copying the Lisp file or hot-loading it into
+an unpatched editor is insufficient.
+
+#+begin_src emacs-lisp
+(require 'window-border)
+(setq window-border-width 2)
+(window-border-mode 1)
+#+end_src
+
+Customize the =window-border= face to change its color. The global mode
+can be enabled during daemon startup; minibuffer, pseudo windows and
+terminal frames reserve no border. Disable the mode to restore normal
+geometry. The overlay's PGTK build is tested; other graphical ports are
+not advertised as supported.
+
+Native regressions are in =tests/window-border-test.el=. Run the tests
+with the built editor in both batch mode and an interactive PGTK frame;
+the graphical geometry tests deliberately skip terminal frames. Actual
+Cairo painting also requires visual inspection after switching windows,
+scrolling, splitting and resizing.
+
 * Background scanning
 Use the normal Gnus commands, including =g= in Group. Upstream enables
 =gnus-background-get-unread-articles= in interactive Emacs. Configure

@@ -6,3 +6,12 @@ License: GPL-3.0-or-later (see COPYING and individual source headers)
 GNU Emacs 31 compatibility: iCalendar parsing adapts the AST-based
 implementation in GNU Emacs 31.1 lisp/gnus/gnus-icalendar.el, retaining
 Commercial Gnus's event participant and recurrence representation.
+
+Window border: ported from the feature history between
+53d81d2cc164f597cba6afd80e2fa7bcf1c8134f and
+c2e4e7e10e5cae4f590075ff1bd12965e9a9a712 (2025-11-01), plus the text-bottom correction in
+e59362fc605711e4a22c56522bfb313f4611b536.
+See patches/gnu-emacs31-window-border.patch. GNU Emacs 31 iterator
+and scrolling algorithms are retained; the port adds their border padding.
+The Cairo renderer and scroll-bar placement in pgtkterm.c are local PGTK
+adaptations. Minibuffer, pseudo windows and terminal frames reserve no border.
