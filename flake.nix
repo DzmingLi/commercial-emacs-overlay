@@ -16,7 +16,7 @@
         '';
         passthru = (old.passthru or { }) // {
           commercialGnusRevision = "bf4184f985d0674a7c03c12eb33b66ac833d9e29";
-          commercialGnusVersion = "0.3.1";
+          commercialGnusVersion = "0.3.2";
         };
       });
     };

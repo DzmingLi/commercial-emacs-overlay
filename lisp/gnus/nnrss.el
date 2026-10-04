@@ -360,10 +360,18 @@ for decoding when the cdr that the data specify is not available.")
   t)
 
 (deffoo nnrss-retrieve-groups (groups &optional server)
-  (dolist (group groups)
-    (setq group (nnrss-decode-group-name group))
-    (nnrss-possibly-change-group group server)
-    (nnrss-check-group group server))
+  ;; Fetching a feed yields to the foreground article reader.  Keep the
+  ;; current feed's mutable data private to this scan, so that a foreground
+  ;; group switch cannot make us save another group's entries into its file.
+  (let ((nnrss-group nil)
+        (nnrss-group-data nil)
+        (nnrss-group-min 1)
+        (nnrss-group-max 0)
+        (nnrss-group-hashtb (make-hash-table :test 'equal)))
+    (dolist (group groups)
+      (setq group (nnrss-decode-group-name group))
+      (nnrss-possibly-change-group group server)
+      (nnrss-check-group group server)))
   (with-current-buffer nntp-server-buffer
     (erase-buffer)
     (dolist (group groups)

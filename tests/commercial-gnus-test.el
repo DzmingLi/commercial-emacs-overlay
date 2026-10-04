@@ -4,6 +4,49 @@
 (require 'gnus-start)
 (require 'gnus-group)
 
+(ert-deftest commercial-gnus-rss-scan-isolates-foreground-group-switches ()
+  (require 'nnrss)
+  (let* ((lock (make-mutex "rss-test"))
+         (condition (make-condition-variable lock "rss-test"))
+         (saved (list nnrss-group nnrss-group-data nnrss-group-max))
+         ready resume observed worker
+         (nntp-server-buffer (generate-new-buffer " *rss-scan-test*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'nnrss-possibly-change-group)
+                   (lambda (group &optional _server)
+                     (setq nnrss-group group
+                           nnrss-group-data '(scanning-feed)
+                           nnrss-group-max 12)))
+                  ((symbol-function 'nnrss-check-group)
+                   (lambda (&rest _)
+                     (with-mutex lock
+                       (setq ready t)
+                       (condition-notify condition)
+                       (while (not resume) (condition-wait condition)))
+                     (setq observed (list nnrss-group nnrss-group-data
+                                          nnrss-group-max)))))
+          (with-mutex lock
+            (setq worker (make-thread
+                          (lambda () (nnrss-retrieve-groups '("feed-a")))
+                          "rss-scan-test"))
+            (while (not ready) (condition-wait condition)))
+          ;; Opening an article on the foreground thread changes the
+          ;; backend globals while the worker is waiting for HTTP.
+          (setq nnrss-group "feed-b"
+                nnrss-group-data '(foreground-feed)
+                nnrss-group-max 99)
+          (with-mutex lock
+            (setq resume t)
+            (condition-notify condition))
+          (thread-join worker)
+          (should (equal observed '("feed-a" (scanning-feed) 12))))
+      (when (and worker (thread-live-p worker))
+        (thread-signal worker 'quit nil))
+      (setq nnrss-group (nth 0 saved)
+            nnrss-group-data (nth 1 saved)
+            nnrss-group-max (nth 2 saved))
+      (kill-buffer nntp-server-buffer))))
+
 (ert-deftest commercial-gnus-rss-data-declares-dynamic-binding ()
   (require 'nnrss)
   (let ((nnrss-directory (make-temp-file "gnus-rss-data-" t))
