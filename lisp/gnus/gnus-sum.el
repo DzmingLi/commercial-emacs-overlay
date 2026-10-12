@@ -3778,26 +3778,35 @@ If KILL-BUFFER, it should be a buffer that's killed once the new
 summary buffer has been generated.
 If BACKWARD, move point to the previous group in the group buffer
 If SELECT-ARTICLES, only select those articles from GROUP."
-  (catch 'done
-    (while t
-      (if-let* ((result
-                (let (gnus-auto-select-next)
-                  (gnus-summary-read-group-1 group show-all no-article
-		                             kill-buffer no-display
-		                             select-articles))))
-          (throw 'done result)
-        (setq show-all nil
-	      select-articles nil))
-      (unless (eq gnus-auto-select-next 'quietly)
-        (throw 'done nil))
-      (set-buffer gnus-group-buffer)
-      (when backward
-        ;; twice prev to compensate for implicit next
-	(gnus-group-prev-unread-group 2))
-      (let ((group* (gnus-group-group-name)))
-        (if (equal group group*)
-            (throw 'done nil)
-	  (setq group group*))))))
+  (let* ((cached-entry (and gnus-background-get-unread-articles
+                            (not gnus-read-cached)
+                            (not no-display)
+                            (eq (car (gnus-find-method-for-group group)) 'nnvirtual)))
+         (gnus-read-cached (or gnus-read-cached cached-entry))
+         ;; Automatic article retrieval must not delay displaying the list.
+         (gnus-auto-select-first (and (not gnus-read-cached) gnus-auto-select-first)))
+    (prog1
+	(catch 'done
+	  (while t
+	    (if-let* ((result
+                       (let (gnus-auto-select-next)
+			 (gnus-summary-read-group-1 group show-all no-article
+						    kill-buffer no-display
+						    select-articles))))
+		(throw 'done result)
+              (setq show-all nil
+		    select-articles nil))
+	    (unless (eq gnus-auto-select-next 'quietly)
+              (throw 'done nil))
+	    (set-buffer gnus-group-buffer)
+	    (when backward
+              ;; twice prev to compensate for implicit next
+	      (gnus-group-prev-unread-group 2))
+	    (let ((group* (gnus-group-group-name)))
+              (if (equal group group*)
+		  (throw 'done nil)
+		(setq group group*)))))
+      (when cached-entry (gnus-request-background-refresh)))))
 
 (defun gnus-summary-read-group-1 (group show-all no-article
 				  kill-buffer no-display
@@ -3892,7 +3901,8 @@ effects."
                ;; Function `gnus-apply-kill-file' must be called in this hook.
                (gnus-run-hooks 'gnus-apply-kill-hook)
                (if (and (zerop (buffer-size))
-                        (not no-display))
+                        (not no-display)
+                        (not gnus-read-cached))
                    (progn
                      ;; This newsgroup is empty.
                      (gnus-summary-catchup-and-exit nil t)
@@ -5455,7 +5465,10 @@ If SELECT-ARTICLES, only select those articles from GROUP."
                          (gnus-find-method-for-group group)))
       (error "Couldn't open server"))
 
-    (or (and entry (not (eq (car entry) t))) ; Either it's active...
+    (or (and entry (not (eq (car entry) t))
+             ;; Source ranges may have grown since this virtual view opened.
+             (not (and gnus-read-cached
+                       (eq (car gnus-current-select-method) 'nnvirtual))))
 	(gnus-activate-group group)	; Or we can activate it...
 	(progn				; Or we bug out.
 	  (when (derived-mode-p 'gnus-summary-mode)
@@ -5528,6 +5541,13 @@ If SELECT-ARTICLES, only select those articles from GROUP."
       (setq articles (gnus-articles-to-read group read-all)))
 
     (cond
+     ((and gnus-read-cached (eq articles 0))
+      (setq gnus-newsgroup-dependencies (gnus-make-hashtable 1)
+            gnus-newsgroup-headers nil
+            gnus-newsgroup-limit nil
+            gnus-newsgroup-articles nil)
+      (gnus-article-setup-buffer)
+      t)
      ((null articles)
       ;;(gnus-message 3 "Couldn't select newsgroup -- no articles to display")
       'quit)
@@ -6931,7 +6951,8 @@ If FORCE (the prefix), also save the .newsrc file(s)."
   "Exit reading current newsgroup, and then return to group selection mode.
 `gnus-exit-group-hook' is called with no arguments if that value is non-nil."
   (interactive nil gnus-summary-mode)
-  (when (gnus-buffer-live-p gnus-article-buffer)
+  (when (and (not gnus-summary-preserve-article)
+             (gnus-buffer-live-p gnus-article-buffer))
     (with-current-buffer gnus-article-buffer
       (mm-destroy-parts gnus-article-mime-handles)
       ;; Set it to nil for safety reason.
@@ -6950,7 +6971,8 @@ If FORCE (the prefix), also save the .newsrc file(s)."
 	 ;; `gnus-single-article-buffer' is nil buffer-locally in
 	 ;; ephemeral group of which summary buffer will be killed,
 	 ;; but the global value may be non-nil.
-	 (single-article-buffer gnus-single-article-buffer))
+	 (single-article-buffer (or gnus-single-article-buffer
+                                  gnus-summary-preserve-article)))
     (unless quit-config
       ;; Do adaptive scoring, and possibly save score files.
       (when gnus-newsgroup-adaptive

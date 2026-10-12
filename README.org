@@ -71,15 +71,35 @@ Use the normal Gnus commands, including =g= in Group. Upstream enables
 =gnus-background-get-unread-articles= in interactive Emacs. Configure
 ordinary Gnus activation levels and subscription state as usual.
 
-The native scanner runs methods serially in an Emacs worker thread.
-It does not promise concurrent requests across every backend. Synchronous
-CPU work can still occupy the Lisp interpreter. Posting and fetching a
-thread's replies are not automatically made asynchronous.
+Startup and entry into a virtual group share a coalesced refresh request.
+The Group or Summary view is displayed first; virtual summaries use known
+source ranges and headers. Sources without cached ranges appear after
+scanning completes. An initially empty virtual Summary stays open while
+waiting, and automatic article selection is suppressed during cached entry.
+Selecting an article explicitly retains normal backend behavior.
 
-Views can adapt to native =gnus-group-update-group= and
-=gnus-after-getting-new-news-hook=. There is no distribution-specific
-notification interface. Consumers must schedule GUI updates on the main
-thread and avoid recursive refreshes caused by their own group updates.
+The scanner selects eligible groups on the main thread, then resolves
+backend capabilities and scans real sources serially in a worker. Virtual
+groups are projections of source state: their counts are computed on the
+main thread without rebuilding a reader's live article mapping. Group
+buffer updates and =gnus-after-getting-new-news-hook= run on the main
+thread. Completion callbacks are scoped to the newsrc session, and each
+worker owns its timeout timer.
+
+=gnus-summary-refresh= rebuilds visible summaries from updated cached
+state. It retains the rendered article, source-based cursor and window
+anchors, and skips summaries with a user-applied limit. A virtual mapping
+records the source ranges it represents, so exiting an older view cannot
+mark newly arrived articles read or erase marks outside that snapshot.
+This module uses native hooks; it installs no advice on core Gnus commands.
+
+Offline, child and synchronous startup retain the existing paths. Primary
+server initialization, custom user hooks, posting and fetching a thread's
+replies are not automatically made asynchronous. CPU-intensive sorting and
+rendering can still occupy the Lisp interpreter. The test suite covers
+worker preparation versus main-thread publication, a cold virtual view
+filling from source state, article and cursor preservation, newly arrived
+unread/marked articles, user limits and obsolete-session callbacks.
 
 * GNU Emacs 31 GTK/PGTK patch
 =patches/gnu-emacs31-glib-worker-wait.patch= keeps GLib/GTK event handling

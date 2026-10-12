@@ -71,6 +71,10 @@ The table is indexed by component group number of the group.")
 (defvoo nnvirtual-mapping-len 0
   "Number of articles in this virtual group.")
 
+(defvoo nnvirtual-mapping-actives nil
+  "Source active ranges represented by the currently displayed mapping.
+Marks outside these ranges belong to articles absent from this view.")
+
 (defvoo nnvirtual-mapping-reads nil
   "Compressed sequence of read articles on the virtual group.
 It is computed from the unread status of individual component groups.")
@@ -229,6 +233,7 @@ It is computed from the marks of individual component groups.")
     (setq nnvirtual-mapping-table nil
 	  nnvirtual-mapping-offsets nil
 	  nnvirtual-mapping-len 0
+          nnvirtual-mapping-actives nil
 	  nnvirtual-mapping-reads nil
 	  nnvirtual-mapping-marks nil
 	  nnvirtual-info-installed nil)
@@ -450,26 +455,37 @@ components."
 				   (nnvirtual-partition-sequence (cdr ml)))))
 			 (gnus-info-marks (gnus-get-info
 					   (nnvirtual-current-group))))))
-	  type groups info)
+	  type groups)
 
       ;; Ok, atomically move all of the (un)read info, clear any old
       ;; marks, and move all of the current marks.  This way if someone
       ;; hits C-g, you won't leave the component groups in a half-way state.
       (progn
-	;; move (un)read
-	;; bind for workaround guns-update-read-articles
-	(let ((gnus-newsgroup-active nil))
-	  (dolist (entry unreads)
-	    (gnus-update-read-articles (car entry) (cdr entry))))
+        ;; A source may gain articles while the old mapping is displayed.
+        ;; Preserve its unread state and marks outside the mapping snapshot.
+        (let ((gnus-newsgroup-active nil))
+          (dolist (entry unreads)
+            (when-let* ((active (cdr (assoc (car entry) nnvirtual-mapping-actives))))
+              (gnus-update-read-articles
+               (car entry)
+               (gnus-sorted-union
+                (cdr entry)
+                (cl-remove-if
+                 (lambda (article) (<= (car active) article (cdr active)))
+                 (gnus-list-of-unread-articles (car entry))))))))
 
-	;; clear all existing marks on the component groups
-	(dolist (group nnvirtual-component-groups)
-	  (when (and (setq info (gnus-get-info group))
-		     (gnus-info-marks info))
-	    (setf (gnus-info-marks info)
-		  (if (assq 'score (gnus-info-marks info))
-		      (list (assq 'score (gnus-info-marks info)))
-		    nil))))
+        (dolist (snapshot nnvirtual-mapping-actives)
+          (when-let* ((info (gnus-get-info (car snapshot))))
+            (setf (gnus-info-marks info)
+                  (delq nil
+                        (mapcar
+                         (lambda (mark)
+                           (if (eq (car mark) 'score) mark
+                             (when-let* ((remaining
+                                          (range-remove (cdr mark)
+                                                        (list (cdr snapshot)))))
+                               (cons (car mark) remaining))))
+                         (gnus-info-marks info))))))
 
 	;; Ok, currently type-marks is an assq list with keys of a mark type,
 	;; with data of an assq list with keys of component group names
@@ -666,6 +682,20 @@ the result."
     carticles))
 
 
+(defun nnvirtual-count-unread (group method)
+  "Count unread source articles for virtual GROUP without changing mappings.
+METHOD supplies the component regexp.  Unknown sources contribute no count
+until their scan finishes; if all sources are unknown, return t."
+  (let ((regexp (or (cadr (assq 'nnvirtual-component-regexp (cddr method)))
+                    (cadr method)))
+        (count 0) known)
+    (dolist (source (cdr gnus-group-list))
+      (when (and (not (equal source group)) (string-match-p regexp source))
+        (let ((unread (gnus-group-unread source)))
+          (when (numberp unread)
+            (setq known t count (+ count unread))))))
+    (if known count t)))
+
 (defun nnvirtual-create-mapping (dont-check)
   "Build tables to map between component (group, article) to virtual article.
 Generate the set of read messages and marks for the virtual group
@@ -678,6 +708,7 @@ based on the marks on the component groups."
 	active min max size unreads marks
 	next-M next-tot
 	reads beg)
+    (setq nnvirtual-mapping-actives nil)
     ;; Ok, we loop over all component groups and collect a lot of
     ;; information:
     ;; Into actives we place (g size max), where size is max-min+1.
@@ -685,13 +716,16 @@ based on the marks on the component groups."
     ;; Into all-marks we put (g marks).
     ;; We also increment cnt and tot here, and compute M (max of sizes).
     (mapc (lambda (g)
-	    (setq active (or (and dont-check
-				  (gnus-active g))
-			     (gnus-activate-group g))
+	    (setq active (if gnus-read-cached
+                             (gnus-active g)
+                           (or (and dont-check (gnus-active g))
+                               (gnus-activate-group g)))
 		  min (car active)
 		  max (cdr active))
 	    (when (and active (>= max min) (not (zerop max)))
-	      ;; store active information
+	      ;; Store a snapshot for propagating only marks represented by this view.
+              (push (cons g (copy-tree active)) nnvirtual-mapping-actives)
+              ;; store active information
 	      (push (list g (- max min -1) max) actives)
 	      ;; collect unread/mark info for later
 	      (setq unreads (gnus-list-of-unread-articles g))

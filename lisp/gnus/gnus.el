@@ -695,6 +695,13 @@ be used directly.")
 
 ;;; Splash screen.
 
+(defvar gnus-summary-preserve-article nil
+  "Non-nil means a view rebuild should retain the rendered article at exit.")
+
+(defvar gnus-read-cached nil
+  "Non-nil means construct a view from known group state without rescanning.
+This is a dynamic rendering context, not a backend or subscription policy.")
+
 (defvar gnus-group-buffer "*Group*"
   "Name of the Gnus group buffer.")
 

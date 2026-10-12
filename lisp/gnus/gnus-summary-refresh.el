@@ -18,8 +18,16 @@
   "Whether completed scans refresh visible Summary buffers."
   :type 'boolean :group 'gnus-summary-refresh)
 
-(defvar gnus-summary-refresh--cached-view nil)
-(defvar gnus-summary-refresh--preserving-article nil)
+(defvar-local gnus-summary-refresh--initial-limits nil
+  "Limit stack established by group entry, before any user filtering.")
+
+(defun gnus-summary-refresh--remember-initial-limits ()
+  "Remember the native initial limits so normal views can update."
+  (setq gnus-summary-refresh--initial-limits (copy-tree gnus-newsgroup-limits)))
+
+(add-hook 'gnus-summary-prepared-hook
+          #'gnus-summary-refresh--remember-initial-limits)
+
 (defvar gnus-summary-refresh--refresh-timer nil)
 (defvar gnus-summary-refresh--refresh-pending nil)
 (defvar gnus-summary-refresh--refresh-running nil)
@@ -55,41 +63,11 @@ Nearby source completions share one rebuild of the latest group state."
         (when gnus-summary-refresh--refresh-pending
           (gnus-summary-refresh--schedule-refresh))))))
 
-(defun gnus-summary-refresh--exit-for-refresh (exit &rest args)
-  "Keep per-group article buffers when EXIT is part of a list refresh.
-Bind this only during exit: binding it for the subsequent group entry
-would redirect the Summary to an empty shared `*Article*' buffer."
-  (let ((gnus-single-article-buffer
-         (or gnus-single-article-buffer
-             (and gnus-summary-refresh--preserving-article
-                  (eq (current-thread) main-thread)))))
-    (apply exit args)))
-
-(advice-add 'gnus-summary-exit :around #'gnus-summary-refresh--exit-for-refresh)
-
-(defun gnus-summary-refresh--activate-cached-group (activate group &optional scan dont-check method dont-sub-check)
-  "Use existing backend data when building the foreground Summary."
-  (funcall activate group scan dont-check method
-           (or dont-sub-check
-               (and gnus-summary-refresh--cached-view
-                    (eq (current-thread) main-thread)))))
-
-(advice-add 'gnus-activate-group :around #'gnus-summary-refresh--activate-cached-group)
-
 (defun gnus-summary-refresh--preserve-article (refresh)
-  "Run REFRESH without destroying the current article's MIME rendering.
-Reselecting a Summary exits the group, which normally undisplays MIME
-parts.  A background list update must leave the article and pending SHR
-image markers intact."
-  (let ((article (and gnus-article-buffer (get-buffer gnus-article-buffer)))
-        (gnus-summary-refresh--preserving-article t)
+  "Rebuild a view without discarding its article or selecting another one."
+  (let ((gnus-summary-preserve-article t)
         (gnus-auto-select-first nil))
-    (if (not article)
-        (funcall refresh)
-      (with-current-buffer article
-        (let ((gnus-article-mime-handles nil)
-              (gnus-article-mime-handle-alist nil))
-          (funcall refresh))))))
+    (funcall refresh)))
 
 (defun gnus-summary-refresh--view-rows ()
   "Return visible rows keyed by stable source group and article number."
@@ -168,7 +146,7 @@ image markers intact."
       ;; Reselecting rebuilds nnvirtual's article mapping, but its normal
       ;; window changes must not interrupt the user's current reading view.
       (let ((inhibit-redisplay t)
-            (gnus-summary-refresh--cached-view t)
+            (gnus-read-cached t)
             (gnus-kill-summary-on-exit nil))
         (save-window-excursion
           (with-current-buffer summary
@@ -204,23 +182,21 @@ image markers intact."
       (with-current-buffer buffer
         (when (and (derived-mode-p 'gnus-summary-mode)
                    (get-buffer-window buffer)
-                   (not gnus-newsgroup-limits)
+                   (equal gnus-newsgroup-limits
+                          gnus-summary-refresh--initial-limits)
                    (not (gnus-ephemeral-group-p gnus-newsgroup-name)))
           (condition-case err
               (gnus-summary-refresh--rebuild-after-scan)
             (error (message "Summary refresh: %s" (error-message-string err)))))))))
 
-(defun gnus-summary-refresh--after-group-update (&rest _)
-  "Queue a view refresh when a backend worker has updated a group.
-Foreground group updates also occur while reselecting the Summary;
-ignoring those prevents a render from scheduling another render."
-  (unless (eq (current-thread) main-thread)
+(defun gnus-summary-refresh--after-group-update ()
+  "Queue a view update after the scanner publishes a visible group.
+Ignore updates produced by rendering a cached view to avoid recursion."
+  (unless (or gnus-read-cached gnus-summary-refresh--refresh-running)
     (gnus-summary-refresh--refresh-after-scan)))
 
-(unless (advice-member-p #'gnus-summary-refresh--after-group-update
-                         'gnus-group-update-group)
-  (advice-add 'gnus-group-update-group :after
-              #'gnus-summary-refresh--after-group-update))
+(add-hook 'gnus-group-update-group-hook
+          #'gnus-summary-refresh--after-group-update)
 (add-hook 'gnus-after-getting-new-news-hook
           #'gnus-summary-refresh--refresh-after-scan)
 

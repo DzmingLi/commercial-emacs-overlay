@@ -42,6 +42,7 @@
 
 (declare-function gnus-group-decoded-name "gnus-group" (string))
 (declare-function gnus-group-default-level "gnus-group")
+(declare-function nnvirtual-count-unread "nnvirtual" (group method))
 
 (defvar gnus-agent-covered-methods)
 (defvar gnus-agent-file-loading-local)
@@ -49,11 +50,14 @@
 (defvar gnus-topic-alist)
 (defvar gnus-inhibit-demon)
 
+(defvar gnus-background-refresh-timer nil
+  "Pending refresh request shared by startup and cached group entry.")
+
 (defconst gnus-thread-group "gnus-get-unread-articles"
   "Identifying prefix for fetching threads.")
 
 (defcustom gnus-thread-timeout-seconds 75
-  "Timeout for individual backend scan."
+  "Maximum duration in seconds of a background scan."
   :group 'gnus-start
   :type 'integer)
 
@@ -662,6 +666,9 @@ the first newsgroup."
 
 (defun gnus-clear-system ()
   "Clear all variables and buffers."
+  (when gnus-background-refresh-timer
+    (cancel-timer gnus-background-refresh-timer)
+    (setq gnus-background-refresh-timer nil))
   ;; Clear Gnus variables.
   (let ((variables (remove 'gnus-format-specs gnus-variable-list)))
     (while variables
@@ -765,7 +772,9 @@ prompt the user for the name of an NNTP server to use."
       (gnus-agentize))
 
     (let ((level (and (numberp arg) (> arg 0) arg))
-	  did-connect)
+	  (defer-refresh (and gnus-background-get-unread-articles
+                              (not dont-connect) (not child)))
+          did-connect)
       (unwind-protect
 	  (progn
 	    (unless dont-connect
@@ -782,7 +791,7 @@ prompt the user for the name of an NNTP server to use."
 	    (gnus-dribble-read-file))
 
 	  ;; Do the actual startup.
-	  (gnus-setup-news nil level dont-connect)
+	  (gnus-setup-news nil level dont-connect defer-refresh)
 	  (gnus-run-hooks 'gnus-setup-news-hook)
 	  (when gnus-agent
 	    (gnus-request-create-group "queue" '(nndraft "")))
@@ -794,7 +803,27 @@ prompt the user for the name of an NNTP server to use."
 	  (gnus-group-first-unread-group)
 	  (gnus-configure-windows 'group)
 	  (gnus-group-set-mode-line)
-	  (gnus-run-hooks 'gnus-started-hook))))))
+	  (gnus-run-hooks 'gnus-started-hook)
+          ;; Let the Group view and its startup hooks finish before requesting
+          ;; the first scan, using the same queue as cached Summary entry.
+          (when defer-refresh
+            (gnus-request-background-refresh level)))))))
+
+(defun gnus-request-background-refresh (&optional level)
+  "Coalesce a refresh for LEVEL after the current view has been displayed.
+The newsrc table identifies this session; a request cannot refresh a later
+session after Gnus has been quit and restarted."
+  (when (and gnus-background-get-unread-articles
+             (not gnus-background-refresh-timer)
+             (not (gnus-thread-group-running-p gnus-thread-group)))
+    (let ((session gnus-newsrc-hashtb))
+      (setq gnus-background-refresh-timer
+            (run-at-time
+             0.1 nil
+             (lambda ()
+               (setq gnus-background-refresh-timer nil)
+               (when (and (eq session gnus-newsrc-hashtb) (gnus-alive-p))
+                 (gnus-get-unread-articles level))))))))
 
 (defun gnus-start-draft-setup ()
   "Make sure the draft group exists."
@@ -926,9 +955,11 @@ If REGEXP is given, lines that match it will be deleted."
 ;;; Active & Newsrc File Handling
 ;;;
 
-(defun gnus-setup-news (&optional _force level dont-connect)
+(defun gnus-setup-news (&optional _force level dont-connect defer-refresh)
   "Setup news information.
-If LEVEL is non-nil, the news will be set up at level LEVEL."
+If LEVEL is non-nil, the news will be set up at level LEVEL.
+If DEFER-REFRESH is non-nil, skip the unread scan; the caller must start it
+after displaying the Group buffer."
   (let ((init (or (not gnus-newsrc-alist) (not gnus-active-hashtb)))
 	;; Binding this variable will inhibit multiple fetchings
 	;; of the same mail source.
@@ -1020,7 +1051,8 @@ If LEVEL is non-nil, the news will be set up at level LEVEL."
 
     ;; Find the number of unread articles in each non-dead group.
     (let ((gnus-read-active-file (and (not level) gnus-read-active-file)))
-      (gnus-get-unread-articles level dont-connect))))
+      (unless defer-refresh
+        (gnus-get-unread-articles level dont-connect)))))
 
 (defun gnus-call-subscribe-functions (method group)
   "Call METHOD to subscribe GROUP.
@@ -1406,6 +1438,10 @@ group name.  If DONT-CHECK, don't check whether the group
 actually exists.  If DONT-SUB-CHECK or DONT-CHECK, don't let the
 backend check whether the group actually exists."
   (setq method (or method (gnus-find-method-for-group group)))
+  ;; A virtual view may rebuild its mapping from active ranges, but must not
+  ;; ask its component backends to check for new data while rendering.
+  (when gnus-read-cached
+    (setq dont-sub-check t))
   (when (gnus-check-server method)
     (when (and scan (gnus-check-backend-function 'request-scan (car method)))
       (gnus-request-scan group method))
@@ -1554,25 +1590,6 @@ backend check whether the group actually exists."
       (prog1 nil
         (thread-signal thr 'error nil)))))
 
-(defun gnus-time-out-thread (started thread)
-  "Reinstall yourself every (gnus-thread-timeout-seconds / 2) seconds.
-Theoretically, in the timed-out case, we'll do this just twice."
-  (interactive)
-  (if (time-less-p nil (time-add started gnus-thread-timeout-seconds))
-      (run-at-time
-       (/ gnus-thread-timeout-seconds 2)
-       nil
-       #'gnus-time-out-thread
-       started
-       thread)
-    (if (thread-live-p thread)
-        (progn
-          (gnus-message-with-timestamp
-           "gnus-time-out-thread: signal quit %s" (thread-name thread))
-          (thread-signal thread 'quit nil))
-      (gnus-message-with-timestamp
-       "gnus-time-out-thread: race on dead %s" (thread-name thread)))))
-
 (defun gnus-run-method (label thread-group &rest fns)
   "THREAD-GROUP is string useful for naming working buffer and threads."
   (let* ((run-name (concat thread-group "-" label))
@@ -1646,7 +1663,7 @@ Sets up `gnus-get-unread-articles--doit'."
 
       (dolist (info (delq nil newsrc))
         (when-let* ((group (gnus-info-group info))
-                   (method (gnus-find-method-for-group group info)))
+                    (method (gnus-find-method-for-group group info)))
           (if (or (and foreign-level (not (numberp foreign-level)))
 	          (funcall (if one-level #'= #'<=)
                            (gnus-info-level info)
@@ -1679,54 +1696,76 @@ Sets up `gnus-get-unread-articles--doit'."
                         (car elem)
                         (gnus-find-method-for-group (gnus-info-group info) info)))
                      (delq nil newsrc))))
-             infos-by-method))
-
-      ;; "Extend" means changing "nnimap" to "nnimap+subaccount"
-      (let (methods)
-        (dolist (elem infos-by-method)
-	  (cl-destructuring-bind (method &rest infos) elem
-	    (let ((gnus-opened-servers methods))
-	      (when (and (gnus-similar-server-opened method)
-		         (gnus-check-backend-function
-			  'retrieve-group-data-early (car method)))
-	        (setq method (gnus-server-extend-method
-			      (gnus-info-group (car infos))
-			      method))
-	        (setcar elem method))
-	      (push (list method 'ok) methods)))))
-
-      ;; Must be able to `gnus-open-server'
-      (setq infos-by-method
-            (cl-remove-if-not
-             (lambda (elem)
-               (cl-destructuring-bind (method &rest infos) elem
-                 (ignore-errors (gnus-get-function method 'open-server))))
              infos-by-method)))
 
-    (let ((doit (apply-partially #'gnus-get-unread-articles--doit
-                                 infos-by-method
-                                 requested-level)))
-      (if gnus-background-get-unread-articles
-          (run-at-time
-           (/ gnus-thread-timeout-seconds 2)
-           nil
-           #'gnus-time-out-thread
-           (current-time)
-           (make-thread doit gnus-thread-group))
+    (let* ((session gnus-newsrc-hashtb)
+           (active gnus-active-hashtb)
+           (newsrc gnus-newsrc-alist)
+           (background gnus-background-get-unread-articles)
+           (read-active gnus-read-active-file)
+           (doit (lambda ()
+                   (let ((gnus-newsrc-hashtb session)
+                         (gnus-active-hashtb active)
+                         (gnus-newsrc-alist newsrc)
+                         (gnus-background-get-unread-articles background)
+                         (gnus-read-active-file read-active)
+                         (gnus-read-cached nil))
+                     (gnus-scope-globals
+                      (gnus-get-unread-articles--doit
+                       infos-by-method requested-level))))))
+      (if background
+          (let (watchdog)
+            (setq watchdog
+                  (run-at-time
+                   gnus-thread-timeout-seconds nil
+                   (lambda (thread)
+                     (when (thread-live-p thread)
+                       (thread-signal thread 'quit nil)))
+                   (make-thread
+                    (lambda ()
+                      (unwind-protect (funcall doit)
+                        (when watchdog (cancel-timer watchdog))))
+                    gnus-thread-group))))
         (funcall doit)))))
+
+
+(defun gnus-prepare-unread-methods (infos-by-method)
+  "Resolve backend capabilities for INFOS-BY-METHOD on the scanning thread."
+  ;; "Extend" means changing "nnimap" to "nnimap+subaccount"
+  (let (methods)
+    (dolist (elem infos-by-method)
+      (cl-destructuring-bind (method &rest infos) elem
+	(let ((gnus-opened-servers methods))
+	  (when (and (gnus-similar-server-opened method)
+		     (gnus-check-backend-function
+		      'retrieve-group-data-early (car method)))
+	    (setq method (gnus-server-extend-method
+			  (gnus-info-group (car infos))
+			  method))
+	    (setcar elem method))
+	  (push (list method 'ok) methods)))))
+
+  ;; Must be able to `gnus-open-server'
+  (setq infos-by-method
+        (cl-remove-if-not
+         (lambda (elem)
+           (cl-destructuring-bind (method &rest infos) elem
+             (ignore-errors (gnus-get-function method 'open-server))))
+         infos-by-method))
+  infos-by-method)
 
 (defun gnus-get-unread-articles--doit (infos-by-method requested-level)
   "Workhorse of `gnus-get-unread-articles'."
-  (let* (methods
-         ;; disallow debugger if backgrounded
-         (inhibit-debugger (if gnus-background-get-unread-articles
-                               t
-                             inhibit-debugger))
-         (debug-on-quit (unless gnus-background-get-unread-articles
-                          debug-on-quit))
-         (debug-on-error (unless gnus-background-get-unread-articles
-                           debug-on-error))
-         (level (gnus-group-default-level requested-level t)))
+  (let* (methods virtual-infos
+		 ;; disallow debugger if backgrounded
+		 (inhibit-debugger (if gnus-background-get-unread-articles
+				       t
+				     inhibit-debugger))
+		 (debug-on-quit (unless gnus-background-get-unread-articles
+				  debug-on-quit))
+		 (debug-on-error (unless gnus-background-get-unread-articles
+				   debug-on-error))
+		 (level (gnus-group-default-level requested-level t)))
     (condition-case-unless-debug err
         (mapc (lambda (elem)
                 (cl-destructuring-bind
@@ -1745,82 +1784,102 @@ Sets up `gnus-get-unread-articles--doit'."
                                        'request-update-info backend))
                             commands)
                     elem
-                  (when (and method (not denied-p) (not already-p))
-                    (push method methods)
-                    (gnus-push-end (gnus-chain-arg
-                                    nil
-                                    #'gnus-open-server
-                                    method)
-                                   commands)
-                    (when early-p
-                      (when scan-p
-                        (gnus-push-end (gnus-chain-arg nil #'gnus-request-scan nil method)
-                                       commands))
-                      ;; Store the token we get back from -early so that we
-                      ;; can pass it to -finish later.
+                  (if (and gnus-background-get-unread-articles
+                           (eq backend 'nnvirtual))
+                      ;; Virtual groups are projections of source state.  Do
+                      ;; not mutate the foreground article mapping in a worker.
+                      (setq virtual-infos (append infos virtual-infos))
+                    (when (and method (not denied-p) (not already-p))
+                      (push method methods)
                       (gnus-push-end (gnus-chain-arg
                                       nil
-                                      #'gnus-retrieve-group-data-early
+                                      #'gnus-open-server
+                                      method)
+                                     commands)
+                      (when early-p
+			(when scan-p
+                          (gnus-push-end (gnus-chain-arg nil #'gnus-request-scan nil method)
+					 commands))
+			;; Store the token we get back from -early so that we
+			;; can pass it to -finish later.
+			(gnus-push-end (gnus-chain-arg
+					nil
+					#'gnus-retrieve-group-data-early
+					method infos)
+                                       commands))
+                      (gnus-push-end (gnus-chain-arg
+                                      t
+                                      #'gnus-read-active-for-groups
                                       method infos)
-                                     commands))
-                    (gnus-push-end (gnus-chain-arg
-                                    t
-                                    #'gnus-read-active-for-groups
-                                    method infos)
-                                   commands)
-                    (gnus-push-end (gnus-chain-arg
-                                    nil
-                                    (lambda (infos* update-p*)
-                                      (mapc (lambda (info)
-                                              (gnus-get-unread-articles-in-group
-                                               info
-                                               (gnus-active (gnus-info-group info))
-                                               update-p*)
-                                              (gnus-group-update-group (gnus-info-group info) t))
-                                            (or infos*
-                                                ;; just added method had no newsrc infos
-                                                (cl-remove-if-not
-                                                 (lambda (info)
-                                                   (and (gnus-methods-equal-p
-                                                         method
-                                                         (let ((method (gnus-info-method info)))
-                                                           (if (stringp method)
-                                                               (gnus-server-to-method method)
-                                                             method)))
-                                                        (gnus-activate-group (gnus-info-group info))))
-                                                 (cdr gnus-newsrc-alist))))
-                                      (gnus-message 6 "Checking new news...done"))
-                                    infos update-p)
-                                   commands)
-                    (apply #'gnus-run-method
-                           (mapconcat (apply-partially #'format "%s")
-                                      (cl-subseq method 0 (min (length method) 2))
-                                      "-")
-                           gnus-thread-group
-                           commands))))
-              infos-by-method)
+                                     commands)
+                      (gnus-push-end (gnus-chain-arg
+                                      nil
+                                      (lambda (infos* update-p*)
+					(gnus-publish-unread-articles
+					 gnus-newsrc-hashtb
+					 (or infos*
+                                             ;; just added method had no newsrc infos
+                                             (cl-remove-if-not
+                                              (lambda (info)
+                                                (and (gnus-methods-equal-p
+                                                      method
+                                                      (let ((method (gnus-info-method info)))
+                                                        (if (stringp method)
+                                                            (gnus-server-to-method method)
+                                                          method)))
+                                                     (gnus-activate-group (gnus-info-group info))))
+                                              (cdr gnus-newsrc-alist)))
+					 update-p*)
+					(gnus-message 6 "Checking new news...done"))
+                                      infos update-p)
+                                     commands)
+                      (apply #'gnus-run-method
+                             (mapconcat (apply-partially #'format "%s")
+					(cl-subseq method 0 (min (length method) 2))
+					"-")
+                             gnus-thread-group
+                             commands)))))
+              (gnus-prepare-unread-methods infos-by-method))
       (error (gnus-message-with-timestamp
               "gnus-get-unread-articles--doit: error %s"
-              (error-message-string err))))
-    (condition-case err
-        (let ((level* (and (numberp level)
-                           (max (or (and (numberp (car gnus-group-list-mode))
-                                         (car gnus-group-list-mode))
-                                    (gnus-group-default-level))
-                                level))))
-          (gnus-message-with-timestamp "gnus-get-unread-articles: all done")
-          (gnus-group-list-groups level*)
-          (gnus-run-hooks 'gnus-after-getting-new-news-hook)
-          (gnus-group-list-groups)
-          (redisplay t))
-      (error (gnus-message-with-timestamp
-              "gnus-get-unread-articles--doit: error coda %s"
-              (error-message-string err))))
-    (when-let* ((timer (cl-find-if (lambda (timer)
-                                    (eq (timer--function timer)
-                                        #'gnus-time-out-thread))
-                                  timer-list)))
-      (cancel-timer timer))))
+              (error-message-string err)))
+      (quit (unless gnus-background-get-unread-articles
+              (signal 'quit nil))
+            (gnus-message-with-timestamp "gnus-get-unread-articles: scan cancelled")))
+    (gnus-publish-unread-articles
+     gnus-newsrc-hashtb nil nil level t virtual-infos)))
+
+(defun gnus-publish-unread-articles (session infos update-p &optional level finished virtual-infos)
+  "Publish scanned INFOS and completion hooks on the main thread.
+Discard callbacks from an obsolete SESSION.  Backend-specific info updates
+remain in the worker because they may access the network."
+  (dolist (info infos)
+    (gnus-get-unread-articles-in-group
+     info (gnus-active (gnus-info-group info)) update-p))
+  (let ((publish
+         (lambda ()
+           (when (eq session gnus-newsrc-hashtb)
+             (dolist (info infos)
+               (gnus-group-update-group (gnus-info-group info) t))
+             (when finished
+               (dolist (info virtual-infos)
+                 (let* ((group (gnus-info-group info))
+                        (method (gnus-find-method-for-group group info))
+                        (entry (gnus-group-entry group)))
+                   (when entry
+                     (setcar entry (nnvirtual-count-unread group method)))))
+               (let ((level* (and (numberp level)
+                                  (max (or (car gnus-group-list-mode)
+                                           (gnus-group-default-level))
+                                       level))))
+                 (gnus-message-with-timestamp "gnus-get-unread-articles: all done")
+                 (gnus-group-list-groups level*)
+                 (gnus-run-hooks 'gnus-after-getting-new-news-hook)
+                 (gnus-group-list-groups)))))))
+    (if (eq (current-thread) main-thread)
+        (funcall publish)
+      (run-at-time 0 nil publish))))
+
 
 (defun gnus-read-active-for-groups (method infos early-data)
   (with-current-buffer nntp-server-buffer
