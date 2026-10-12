@@ -3104,6 +3104,9 @@ If this variable is nil, don't do anything."
 				   (car match))))
 	(push (list (symbol-value active) method) actives)))))
 
+(with-eval-after-load 'gnus-sum
+  (require 'gnus-summary-refresh))
+
 (provide 'gnus-start)
 
 ;;; gnus-start.el ends here

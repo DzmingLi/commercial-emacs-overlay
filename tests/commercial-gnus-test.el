@@ -239,3 +239,33 @@
       (message-multi-smtp-send-mail)
       (should (= hooks 1))
       (should (equal received '("example.invalid" 465 "alice" tls))))))
+
+(require 'gnus-summary-refresh)
+(ert-deftest commercial-gnus-refresh-ordinary-source-identities ()
+  (with-temp-buffer
+    (insert "first\nsecond\n")
+    (let ((gnus-newsgroup-name "nnrss:feed"))
+      (cl-letf (((symbol-function 'gnus-summary-article-number)
+                 (lambda () (1+ (line-number-at-pos)))))
+        (should (equal (mapcar #'car (gnus-summary-refresh--view-rows))
+                       '(("nnrss:feed" . 2) ("nnrss:feed" . 3))))))))
+
+(ert-deftest commercial-gnus-refresh-virtual-source-identities ()
+  (with-temp-buffer
+    (insert "first\n")
+    (let ((gnus-newsgroup-name "nnvirtual:combined"))
+      (cl-letf (((symbol-function 'gnus-summary-article-number) (lambda () 9))
+                ((symbol-function 'nnvirtual-find-group-art)
+                 (lambda (group number)
+                   (should (equal group "combined"))
+                   (should (= number 9))
+                   '("nnrss:feed" . 42))))
+        (should (equal (caar (gnus-summary-refresh--view-rows))
+                       '("nnrss:feed" . 42)))))))
+
+(ert-deftest commercial-gnus-refresh-anchor-prefers-next-survivor ()
+  (with-temp-buffer
+    (insert "a\nb\nc\n")
+    (should (equal (gnus-summary-refresh--view-anchor
+                    '((a . 1) (b . 3) (c . 5)) 3)
+                   '((b . 3) (c . 5) (a . 1))))))
