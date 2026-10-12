@@ -2476,6 +2476,7 @@ such as a mark that says whether an article is stored in the cache
   '(gnus-newsrc-options gnus-newsrc-options-n
 			gnus-newsrc-last-checked-date
 			gnus-newsrc-alist gnus-server-alist
+                        gnus-group-startup-cache
 			gnus-killed-list gnus-zombie-list
 			gnus-topic-topology gnus-topic-alist
 			gnus-cloud-sequence
@@ -2486,6 +2487,11 @@ such as a mark that says whether an article is stored in the cache
 (defvar gnus-newsrc-alist nil
   "Assoc list of read articles.
 `gnus-newsrc-hashtb' should be kept so that both hold the same information.")
+
+(defvar gnus-group-startup-cache nil
+  "Last known group counts and active ranges for immediate startup display.
+Each entry is (GROUP UNREAD ACTIVE).  Background scans replace these stale
+values; they are never used to infer read marks or fetch new articles.")
 
 (defvar gnus-registry-alist nil
   "Assoc list of registry data.

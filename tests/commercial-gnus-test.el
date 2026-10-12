@@ -280,6 +280,40 @@
                     '((a . 1) (b . 3) (c . 5)) 3)
                    '((b . 3) (c . 5) (a . 1))))))
 
+(ert-deftest commercial-gnus-startup-cache-survives-newsrc-and-restores-counts ()
+  (let* ((gnus-newsrc-alist
+          (list (gnus-info-make "nnrss:cached" 2 nil nil '(nnrss ""))
+                (gnus-info-make "nnvirtual:cached" 2 nil nil '(nnvirtual "cached"))))
+         (gnus-newsrc-hashtb nil) (gnus-group-list nil)
+         (gnus-active-hashtb (make-hash-table :test #'equal))
+         (gnus-group-startup-cache nil))
+    (gnus-make-hashtable-from-newsrc-alist)
+    (setcar (gnus-group-entry "nnrss:cached") 7)
+    (setcar (gnus-group-entry "nnvirtual:cached") 7)
+    (puthash "nnrss:cached" '(1 . 10) gnus-active-hashtb)
+    (gnus-save-group-startup-cache)
+    (let ((serialized (with-output-to-string
+                        (gnus-gnus-to-quick-newsrc-format
+                         t nil 'gnus-group-startup-cache))))
+      (setq gnus-group-startup-cache nil
+            gnus-newsrc-hashtb nil
+            gnus-active-hashtb (make-hash-table :test #'equal))
+      (with-temp-buffer
+        (insert serialized)
+        (eval-buffer))
+      (gnus-make-hashtable-from-newsrc-alist)
+      (should-not (car (gnus-group-entry "nnrss:cached")))
+      (gnus-restore-group-startup-cache)
+      (should (= (car (gnus-group-entry "nnrss:cached")) 7))
+      (should (= (car (gnus-group-entry "nnvirtual:cached")) 7))
+      (should (equal (gnus-active "nnrss:cached") '(1 . 10)))
+      ;; A stale snapshot must not replace a newly published result.
+      (setcar (gnus-group-entry "nnrss:cached") 9)
+      (puthash "nnrss:cached" '(1 . 12) gnus-active-hashtb)
+      (gnus-restore-group-startup-cache)
+      (should (= (car (gnus-group-entry "nnrss:cached")) 9))
+      (should (equal (gnus-active "nnrss:cached") '(1 . 12))))))
+
 (ert-deftest commercial-gnus-startup-displays-before-refresh ()
   (dolist (mode '(background synchronous offline child))
     (let ((gnus-background-get-unread-articles (not (eq mode 'synchronous)))

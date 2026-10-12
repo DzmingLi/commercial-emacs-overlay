@@ -25,6 +25,7 @@
 ;;; Code:
 
 (require 'gnus)
+(require 'cl-lib)
 (require 'gnus-win)
 (require 'gnus-int)
 (require 'gnus-spec)
@@ -1008,6 +1009,8 @@ after displaying the Group buffer."
       (gnus-update-active-hashtb-from-killed))
     (unless gnus-active-hashtb
       (setq gnus-active-hashtb (gnus-make-hashtable 4000)))
+    (when (and init defer-refresh)
+      (gnus-restore-group-startup-cache))
     ;; Initialize the cache.
     (when gnus-use-cache
       (gnus-cache-open))
@@ -2777,12 +2780,40 @@ The form should return either t or nil."
           'msdos-long-file-names
         (lambda () t)))))
 
+(defun gnus-save-group-startup-cache ()
+  "Snapshot known counts and ranges without contacting any backend."
+  (setq gnus-group-startup-cache
+        (cl-loop for info in gnus-newsrc-alist
+                 for group = (gnus-info-group info)
+                 for entry = (gnus-group-entry group)
+                 for active = (and gnus-active-hashtb
+                                   (gethash group gnus-active-hashtb))
+                 when (and entry (numberp (car entry)))
+                 collect (list group (car entry) (copy-tree active)))))
+
+(defun gnus-restore-group-startup-cache ()
+  "Restore last known Group rows before the first background scan."
+  (dolist (cached gnus-group-startup-cache)
+    (pcase-let ((`(,group ,unread ,active) cached))
+      (when-let* ((entry (gnus-group-entry group)))
+        (when (and (null (car entry)) (natnump unread))
+          (setcar entry unread))
+        (when (and (consp active) (integerp (car active))
+                   (integerp (cdr active))
+                   (not (gethash group gnus-active-hashtb)))
+          (puthash group (copy-tree active) gnus-active-hashtb))))))
+
 (defun gnus-save-newsrc-file (&optional force)
   "Save .newsrc file.
 Use the group string names in `gnus-group-list' to pull info
 values from `gnus-newsrc-hashtb', and write a new value of
 `gnus-newsrc-alist'."
   (when (or gnus-newsrc-alist gnus-killed-list)
+    (let ((previous gnus-group-startup-cache))
+      (gnus-save-group-startup-cache)
+      ;; Scanning can change counts without creating a dribble entry.
+      (unless (equal previous gnus-group-startup-cache)
+        (setq force t)))
     ;; Save agent range limits for the currently active method.
     (when gnus-agent
       (gnus-agent-save-local force))
