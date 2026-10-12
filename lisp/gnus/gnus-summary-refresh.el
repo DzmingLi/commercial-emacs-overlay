@@ -147,6 +147,9 @@ Nearby source completions share one rebuild of the latest group state."
       ;; window changes must not interrupt the user's current reading view.
       (let ((inhibit-redisplay t)
             (gnus-read-cached t)
+            ;; This group is already open.  Background re-entry must not
+            ;; stop in the Group buffer to ask how many articles to read.
+            (gnus-large-newsgroup nil)
             (gnus-kill-summary-on-exit nil))
         (save-window-excursion
           (with-current-buffer summary

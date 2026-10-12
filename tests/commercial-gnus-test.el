@@ -462,7 +462,13 @@
               ;; Simulate publication of the first source scan.
               (gnus-set-active "nnrss:feed" '(1 . 2))
               (setcar (gnus-group-entry "nnrss:feed") 2)
-              (gnus-summary-refresh--rebuild-visible)
+              ;; Already-open aggregates must refresh past the large-group
+              ;; threshold without reading from the minibuffer.
+              (let ((gnus-large-newsgroup 1))
+                (cl-letf (((symbol-function 'read-number)
+                           (lambda (&rest _) (ert-fail "Background refresh prompted"))))
+                  (gnus-summary-refresh--rebuild-visible))
+                (should (= gnus-large-newsgroup 1)))
               (setq summary (get-buffer "*Summary nnvirtual:aggregate*"))
               (with-current-buffer summary
                 (should (string-match-p "First" (buffer-string)))
