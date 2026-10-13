@@ -96,6 +96,11 @@ IMAP scans receive and parse their complete flag response while holding the
 connection mutex. The publication phase uses that captured data, so a
 foreground request reusing the connection cannot discard scan responses or
 misclassify existing messages as nonexistent.
+Each send retains its own command tag across thread switches. Reply waits
+locate that exact completion even when later replies follow it, skipping
+opaque IMAP literal data. A 60-second response timeout closes stalled
+connections so retries cannot reuse ambiguous pending commands. Customize
+=nnimap-response-timeout= for slower connections.
 
 =gnus-summary-refresh= rebuilds visible summaries from updated cached
 state. It retains the rendered article, source-based cursor and window

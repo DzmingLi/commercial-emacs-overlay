@@ -33,6 +33,7 @@
 (require 'nnmail)
 (require 'cl-seq)
 (require 'json)
+(defvar gnus-background-get-unread-articles)
 
 (autoload 'auth-source-forget+ "auth-source")
 (autoload 'auth-source-search "auth-source")
@@ -2050,20 +2051,16 @@ This is all changing."
 
 (defun nnimap-send-command (&rest args)
   (setf (nnimap-last-command-time nnimap-object) (current-time))
-  (process-send-string
-   (get-buffer-process (current-buffer))
-   (nnimap-log-command
-    (format "%d %s%s\n"
-	    (cl-incf nnimap-sequence)
-	    (apply #'format args)
-	    (if (nnimap-newlinep nnimap-object)
-		""
-	      "\r"))))
-  ;; Some servers apparently can't have many outstanding
-  ;; commands, so throttle them.
-  (unless nnimap-streaming
-    (nnimap-wait-for-response nnimap-sequence))
-  nnimap-sequence)
+  ;; Sending can yield to another connection or a keepalive callback. Never
+  ;; return the shared counter after yielding: it may belong to that command.
+  (let ((sequence (cl-incf nnimap-sequence)))
+    (process-send-string
+     (get-buffer-process (current-buffer))
+     (nnimap-log-command
+      (format "%d %s%s\n" sequence (apply #'format args)
+              (if (nnimap-newlinep nnimap-object) "" "\r"))))
+    (unless nnimap-streaming (nnimap-wait-for-response sequence))
+    sequence))
 
 (defvar nnimap-record-commands nil
   "If non-nil, log commands to the \"*imap log*\" buffer.")
@@ -2099,8 +2096,8 @@ This is all changing."
 				    (car response) " "))))))
 
 (defun nnimap-get-response (sequence)
-  (nnimap-wait-for-response sequence)
-  (nnimap-parse-response))
+  (when (nnimap-wait-for-response sequence)
+    (nnimap-parse-response)))
 
 (defun nnimap-wait-for-connection (&optional regexp)
   (nnimap-wait-for-line (or regexp "^[*.] .*\n") "[*.] \\([A-Z0-9]+\\)"))
@@ -2117,44 +2114,56 @@ This is all changing."
     (and (looking-at (or response-regexp regexp))
 	 (match-string 1))))
 
+(defcustom nnimap-response-timeout 60
+  "Maximum seconds to wait for an IMAP command completion.
+A timed-out connection is closed so its ambiguous pending commands cannot
+contaminate a retry. Cached headers and Gnus read state remain available."
+  :type 'number :group 'nnimap)
+
+(defun nnimap--find-command-completion (sequence)
+  "Find SEQUENCE's complete reply, skipping opaque IMAP literal payloads."
+  (let ((tag (format "^%d \\(?:OK\\|NO\\|BAD\\)\\(?: [^\r\n]*\\)?\r?\n" sequence)))
+    (goto-char (point-min))
+    (catch 'complete
+      (while (not (eobp))
+        (let* ((start (point))
+               (end (save-excursion (search-forward "\n" nil t))))
+          (unless end (throw 'complete nil))
+          (when (looking-at tag) (throw 'complete start))
+          ;; FETCH bodies and LIST strings may contain fake-looking tagged
+          ;; lines. Literal counts are octets; process buffers are unibyte.
+          (if (re-search-forward "{\\([0-9]+\\)\\+?}\r?\n" end t)
+              (let ((size (string-to-number (match-string 1))))
+                (unless (<= (+ (point) size) (point-max))
+                  (throw 'complete nil))
+                (forward-char size))
+            (goto-char end))))
+      nil)))
+
 (defun nnimap-wait-for-response (sequence &optional messagep)
-  (let (openp
-        (process (get-buffer-process (current-buffer))))
+  (let* ((process (get-buffer-process (current-buffer)))
+         (deadline (+ (float-time) nnimap-response-timeout))
+         complete)
     (condition-case nil
         (progn
-	  (goto-char (point-max))
-	  (while (and (setq openp (memq (process-status process)
-					'(open run)))
-		      (progn
-			;; Skip past any "*" lines that the server has
-			;; output.
-			(while (and (not (bobp))
-				    (progn
-				      (forward-line -1)
-				      (looking-at "\\*\\|[0-9]+ OK NOOP"))))
-			(not (looking-at (format "%d .*\n" sequence)))))
-	    (when messagep
-	      (nnheader-message-maybe
-	       7 "nnimap read %dk from %s%s" (/ (buffer-size) 1000)
-	       nnimap-address
-	       (if (zerop (nnimap-initial-resync nnimap-object))
-                   ""
-		 (format " (initial sync of %d group%s; please wait)"
-			 (nnimap-initial-resync nnimap-object)
-			 (if (= (nnimap-initial-resync nnimap-object) 1)
-			     ""
-			   "s")))))
-	    (nnheader-accept-process-output process)
-	    (goto-char (point-max)))
-	  (setf (nnimap-initial-resync nnimap-object) 0)
-          openp)
+          ;; A later tagged reply or unsolicited response may follow ours.
+          ;; Locate this command's complete line, rather than just the last tag.
+          (while (and (memq (process-status process) '(open run))
+                      (not (setq complete
+                                 (nnimap--find-command-completion sequence))))
+            (when (>= (float-time) deadline)
+              (delete-process process)
+              (error "IMAP command %d timed out" sequence))
+            (when messagep
+              (nnheader-message-maybe 7 "nnimap read %dk from %s"
+                                      (/ (buffer-size) 1000) nnimap-address))
+            (nnheader-accept-process-output process))
+          (setf (nnimap-initial-resync nnimap-object) 0)
+          (when complete (goto-char complete) t))
       (quit
-       (when debug-on-quit
-	 (debug "Quit"))
-       ;; The user hit C-g while we were waiting: kill the process, in case
-       ;; it's a gnutls-cli process that's stuck (tends to happen a lot behind
-       ;; NAT routers).
-       (prog1 nil (delete-process process))))))
+       (when debug-on-quit (debug "Quit"))
+       (delete-process process)
+       nil))))
 
 (defun nnimap-parse-response ()
   (let ((lines (split-string (nnimap-last-response-string) "\r\n" t))
