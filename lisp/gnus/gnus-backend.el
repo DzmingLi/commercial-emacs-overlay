@@ -70,9 +70,13 @@ Ordinary reading and marking never wait here.  Each job retains its deadline."
   "Send data PAYLOAD to PROCESS, without putting credentials on its argv."
   (let ((print-length nil) (print-level nil) (print-circle nil))
     (process-send-string process
-                         (concat (json-serialize
-                                  (list :version 1 :id id
-                                        :payload (prin1-to-string payload))) "\n"))))
+                         ;; `json-serialize' returns UTF-8 bytes.  The process
+                         ;; coding system expects text and encodes it once.
+                         (concat (decode-coding-string
+                                  (json-serialize
+                                   (list :version 1 :id id
+                                         :payload (prin1-to-string payload)))
+                                  'utf-8) "\n"))))
 
 (defun gnus-backend--filter (actor _process text)
   "Hand off immutable TEXT; process filters may run during worker I/O."

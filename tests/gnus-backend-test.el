@@ -37,6 +37,40 @@
       (gnus-dispatch-drain)))
   (should (funcall predicate)))
 
+(ert-deftest gnus-backend-real-process-preserves-unicode-and-raw-bytes ()
+  (gnus-backend-test--session
+    (let ((expected (concat "Subject: 中文 café 😀\n\n"
+                            (string-as-multibyte (unibyte-string 0 128 233 255)))))
+      (let ((print-escape-nonascii t) (print-escape-multibyte t))
+        (write-region
+         (concat "\n(defun gnus-request-article (_number _group buffer)\n"
+                 " (with-current-buffer buffer (insert "
+                 (prin1-to-string expected) ")) t)\n")
+         nil gnus-backend-worker-init-file t 'silent))
+      (gnus-backend-request method 'article '(:article 1 :group "nnimap+fixture:INBOX")
+                            (lambda (value) (setq result value))
+                            (lambda (err) (setq failure err)))
+      (gnus-backend-test--wait (lambda () (or failure result)))
+      (should-not failure)
+      (should (equal result expected)))))
+
+(ert-deftest gnus-backend-real-process-preserves-unicode-requests-and-errors ()
+  (gnus-backend-test--session
+    (write-region
+     "\n(defun gnus-request-article (number group buffer)\n (if (= number 99) (error \"邮件 café 😀\")\n (with-current-buffer buffer (insert group)) t))\n"
+     nil gnus-backend-worker-init-file t 'silent)
+    (let ((group "nnimap+fixture:收件箱/café/😀"))
+      (gnus-backend-request method 'article (list :article 1 :group group)
+                            (lambda (value) (setq result value))
+                            (lambda (err) (setq failure err)))
+      (gnus-backend-test--wait (lambda () (or failure result)))
+      (should-not failure)
+      (should (equal result group)))
+    (gnus-backend-request method 'article '(:article 99 :group "nnimap+fixture:INBOX")
+                          #'ignore (lambda (err) (setq failure err)))
+    (gnus-backend-test--wait (lambda () failure))
+    (should (equal failure "邮件 café 😀"))))
+
 (ert-deftest gnus-backend-real-process-reuses-serial-connection-owner ()
   (gnus-backend-test--session
     (let (results)

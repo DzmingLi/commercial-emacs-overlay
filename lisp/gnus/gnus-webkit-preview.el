@@ -157,6 +157,7 @@ Return the HTML filename.  No native MIME handle is destroyed or modified."
 
 (defvar gnus-webkit-preview-thread-mode-map
   (let ((map (make-sparse-keymap)))
+    (define-key map "q" #'gnus-reading-quit)
     (define-key map "n" #'gnus-webkit-preview-next)
     (define-key map "p" #'gnus-webkit-preview-previous)
     (define-key map "r" #'gnus-webkit-preview-reply)
@@ -201,7 +202,7 @@ This predicate does not select or fetch an article."
             (with-current-buffer preview
               (setq gnus-webkit-preview--owned-source t
                     gnus-webkit-preview--thread reader
-                    header-line-format "Gnus thread · n/p article · r reply · q return to thread")
+                    header-line-format "Gnus thread · n/p article · r reply · q return to summary")
               (gnus-webkit-preview-thread-mode 1))))
       (when (and (not preview) (buffer-live-p source))
         (with-current-buffer source (mm-destroy-parts gnus-article-mime-handles))

@@ -853,6 +853,7 @@ News articles use followup; mail articles use reply-to-author."
     (define-key map (kbd "N") #'gnus-thread-reader-next-unread)
     (define-key map (kbd "o") #'gnus-thread-reader-original)
     (define-key map (kbd "s") #'gnus-thread-reader-summary)
+    (define-key map (kbd "q") #'gnus-reading-quit)
     (define-key map (kbd "m") #'ignore)
     map))
 

@@ -106,10 +106,15 @@
                                   (car (read-from-string (plist-get wire :payload)))))))
               ((error quit) (setq failure (error-message-string err))))
             (let ((print-length nil) (print-level nil) (print-circle nil))
-              (princ (concat (json-serialize
-                              (list :version 1 :id id
-                                    :result (prin1-to-string result)
-                                    :error (or failure :null))) "\n") t))))
+              ;; The serializer returns UTF-8 bytes, but `princ' expects
+              ;; text.  Printing the bytes directly emits Emacs raw-byte
+              ;; sequences for non-ASCII characters, which are not UTF-8.
+              (princ (concat (decode-coding-string
+                              (json-serialize
+                               (list :version 1 :id id
+                                     :result (prin1-to-string result)
+                                     :error (or failure :null)))
+                              'utf-8) "\n") t))))
       (end-of-file nil))))
 
 (provide 'gnus-backend-worker)
