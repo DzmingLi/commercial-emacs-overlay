@@ -1537,23 +1537,25 @@ If LIMIT, first try to limit the search to the N last articles."
 			  (nnimap-send-command "UID FETCH %d:* FLAGS" start)
 			  start group command)
 		    sequences))))
-	sequences))))
+        ;; The process buffer is shared with foreground header/body requests.
+        ;; Capture the complete response while this transaction still owns its
+        ;; mutex: re-entering `nnimap-with-process-buffer' clears that buffer.
+        (when (and sequences
+                   (nnimap-wait-for-response
+                    (if (eq (cadar sequences) 'qresync)
+                        (caar sequences)
+                      (cadar sequences)) t))
+          (list 'nnimap-scan-data
+                (nnimap-flags-to-marks
+                 (nnimap-parse-flags (nreverse sequences)))))))))
 
 (deffoo nnimap-finish-retrieve-group-infos (server infos sequences &optional dont-insert)
   (when (and sequences (nnimap-change-group nil server t))
     (nnimap-with-process-buffer
-      ;; Wait for the final data to trickle in.
-      (when (nnimap-wait-for-response (if (eq (cadar sequences) 'qresync)
-					  (caar sequences)
-					(cadar sequences))
-				      t)
-	;; Now we should have most of the data we need, no matter
-	;; whether we're QRESYNCING, fetching all the flags from
-	;; scratch, or just fetching the last 100 flags per group.
-	(nnimap-update-infos (nnimap-flags-to-marks
-			      (nnimap-parse-flags
-			       (nreverse sequences)))
-			     infos)
+      ;; EARLY has already captured and parsed the transaction.  Another
+      ;; request may have reused the process buffer before publication.
+      (when (eq (car sequences) 'nnimap-scan-data)
+        (nnimap-update-infos (cadr sequences) infos)
 	(unless dont-insert
 	  ;; Finally, just return something resembling an active file in
 	  ;; the nntp buffer, so that the agent can save the info, too.

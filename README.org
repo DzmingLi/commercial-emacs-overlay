@@ -86,6 +86,11 @@ buffer updates and =gnus-after-getting-new-news-hook= run on the main
 thread. Completion callbacks are scoped to the newsrc session, and each
 worker owns its timeout timer.
 
+IMAP scans receive and parse their complete flag response while holding the
+connection mutex. The publication phase uses that captured data, so a
+foreground request reusing the connection cannot discard scan responses or
+misclassify existing messages as nonexistent.
+
 =gnus-summary-refresh= rebuilds visible summaries from updated cached
 state. It retains the rendered article, source-based cursor and window
 anchors, and skips summaries with a user-applied limit. A virtual mapping
