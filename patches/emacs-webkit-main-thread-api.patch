@@ -1,0 +1,55 @@
+--- a/webkit-module.c
++++ b/webkit-module.c
+@@ -1112,6 +1112,33 @@
+   return env->make_user_ptr (env, client_free, (void *) c);
+ }
+ 
++/* Every exported function enters through this guard, including destruction.
++   Lisp worker I/O may run timers: reject before touching any GTK/WebKit API. */
++typedef struct {
++  emacs_value (*function) (emacs_env *, ptrdiff_t, emacs_value *, void *);
++  void *data;
++} MainThreadFunction;
++
++static emacs_value
++call_on_main (emacs_env *env, ptrdiff_t n, emacs_value *args, void *data)
++{
++  emacs_value current = env->funcall (env, env->intern (env, "current-thread"), 0, NULL);
++  emacs_value main_symbol = env->intern (env, "main-thread");
++  emacs_value main = env->funcall (env, env->intern (env, "symbol-value"), 1, &main_symbol);
++  if (env->non_local_exit_check (env) != emacs_funcall_exit_return)
++    return Qnil;
++  if (!env->eq (env, current, main))
++    {
++      const char message[] = "WebKit calls require the main Emacs thread";
++      emacs_value text = env->make_string (env, message, sizeof message - 1);
++      emacs_value list = env->funcall (env, env->intern (env, "list"), 1, &text);
++      env->non_local_exit_signal (env, env->intern (env, "error"), list);
++      return Qnil;
++    }
++  MainThreadFunction *entry = data;
++  return entry->function (env, n, args, entry->data);
++}
++
+ static void
+ mkfn (emacs_env *env,
+       ptrdiff_t min_arity,
+@@ -1124,8 +1151,17 @@
+       const char *docstring,
+       void *data)
+ {
++  MainThreadFunction *entry = malloc (sizeof *entry);
++  if (entry == NULL)
++    {
++      env->non_local_exit_signal (env, env->intern (env, "memory-full"), Qnil);
++      return;
++    }
++  entry->function = func;
++  entry->data = data;
+   emacs_value Sfun = env->make_function (env, min_arity, max_arity,
+-                                         func, docstring, data);
++                                         call_on_main, docstring, entry);
++  env->set_function_finalizer (env, Sfun, free);
+   emacs_value Qfset = env->intern (env, "fset");
+   emacs_value Qsym = env->intern (env, name);
+ 

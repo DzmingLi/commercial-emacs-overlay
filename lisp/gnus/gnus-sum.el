@@ -11008,6 +11008,8 @@ If NO-EXPIRE, auto-expiry will be inhibited."
 		   (gnus-mark-article-as-unread article mark)
 		 (gnus-mark-article-as-read article mark)))
 	  t
+        (when (fboundp 'gnus-backend-note-mark)
+          (gnus-backend-note-mark gnus-newsgroup-name article mark))
 	;; See whether the article is to be put in the cache.
 	(and gnus-use-cache
 	     (not (= mark gnus-canceled-mark))

@@ -24,6 +24,8 @@
 
 ;;; Code:
 
+(require 'gnus-dispatch)
+(declare-function gnus-backend-scan "gnus-backend-state" (method infos))
 (require 'gnus)
 (require 'cl-lib)
 (require 'gnus-win)
@@ -822,9 +824,11 @@ session after Gnus has been quit and restarted."
             (run-at-time
              0.1 nil
              (lambda ()
-               (setq gnus-background-refresh-timer nil)
-               (when (and (eq session gnus-newsrc-hashtb) (gnus-alive-p))
-                 (gnus-get-unread-articles level))))))))
+               (gnus-dispatch-submit
+                (lambda ()
+                 (setq gnus-background-refresh-timer nil)
+                 (when (and (eq session gnus-newsrc-hashtb) (gnus-alive-p))
+                 (gnus-get-unread-articles level))))))))))
 
 (defun gnus-start-draft-setup ()
   "Make sure the draft group exists."
@@ -1701,6 +1705,15 @@ Sets up `gnus-get-unread-articles--doit'."
                      (delq nil newsrc))))
              infos-by-method)))
 
+    (when gnus-background-get-unread-articles
+      (require 'gnus-backend-state)
+      (setq infos-by-method
+            (cl-remove-if
+             (lambda (entry)
+               (when (and (cdr entry) (gnus-backend-process-p (car entry)))
+                 (gnus-backend-scan (car entry) (cdr entry))
+                 t)) infos-by-method)))
+
     (let* ((session gnus-newsrc-hashtb)
            (active gnus-active-hashtb)
            (newsrc gnus-newsrc-alist)
@@ -1881,7 +1894,7 @@ remain in the worker because they may access the network."
                  (gnus-group-list-groups)))))))
     (if (eq (current-thread) main-thread)
         (funcall publish)
-      (run-at-time 0 nil publish))))
+      (gnus-dispatch-submit publish))))
 
 
 (defun gnus-read-active-for-groups (method infos early-data)

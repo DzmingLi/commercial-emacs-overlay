@@ -7,23 +7,28 @@
 
 ;;; Code:
 (require 'cl-lib)
+(require 'gnus-dispatch)
 (require 'subr-x)
 (require 'gnus-group)
 (require 'gnus-sum)
 (require 'nnvirtual)
 (defvar gnus-thread-reader--summary)
+(declare-function gnus-backend-state--apply-mark "gnus-backend-state" (info number mark))
 (defgroup gnus-summary-refresh nil
   "Background Summary updates." :group 'gnus)
 (defcustom gnus-summary-refresh-enabled t
   "Whether completed scans refresh visible Summary buffers."
   :type 'boolean :group 'gnus-summary-refresh)
 
+(defvar-local gnus-summary-refresh--mark-baseline nil)
+
 (defvar-local gnus-summary-refresh--initial-limits nil
   "Limit stack established by group entry, before any user filtering.")
 
 (defun gnus-summary-refresh--remember-initial-limits ()
   "Remember the native initial limits so normal views can update."
-  (setq gnus-summary-refresh--initial-limits (copy-tree gnus-newsgroup-limits)))
+  (setq gnus-summary-refresh--initial-limits (copy-tree gnus-newsgroup-limits)
+        gnus-summary-refresh--mark-baseline (gnus-summary-refresh--marks)))
 
 (add-hook 'gnus-summary-prepared-hook
           #'gnus-summary-refresh--remember-initial-limits)
@@ -36,7 +41,8 @@
   "Arrange one list rebuild after a brief pause in user input."
   (unless gnus-summary-refresh--refresh-timer
     (setq gnus-summary-refresh--refresh-timer
-          (run-with-idle-timer 0.15 nil #'gnus-summary-refresh--flush-refresh))))
+          (run-with-idle-timer 0.15 nil #'gnus-dispatch-submit
+                               #'gnus-summary-refresh--flush-refresh))))
 
 (defun gnus-summary-refresh--refresh-after-scan (&rest _)
   "Queue a Summary update without blocking a completed group callback.
@@ -134,49 +140,47 @@ Nearby source completions share one rebuild of the latest group state."
             (set-window-hscroll window hscroll)
             (set-window-vscroll window vscroll t)))))))
 
-(defun gnus-summary-refresh--rebuild-after-scan ()
-  "Rebuild the visible Summary from the latest completed group scans."
-  (let* ((summary (current-buffer))
-         (group gnus-newsgroup-name)
-         (all (eq gnus-newsgroup-display #'gnus-not-ignore))
-         (summary-window (and summary (get-buffer-window summary)))
-         (view (and summary-window
-                    (with-current-buffer summary (gnus-summary-refresh--save-view)))))
-    (when summary-window
-      ;; Reselecting rebuilds nnvirtual's article mapping, but its normal
-      ;; window changes must not interrupt the user's current reading view.
-      (let ((inhibit-redisplay t)
-            (gnus-read-cached t)
-            ;; This group is already open.  Background re-entry must not
-            ;; stop in the Group buffer to ask how many articles to read.
-            (gnus-large-newsgroup nil)
-            (gnus-kill-summary-on-exit nil))
-        (save-window-excursion
-          (with-current-buffer summary
-            (gnus-summary-refresh--preserve-article
-             (lambda ()
-               (with-selected-window summary-window
-                 (with-current-buffer summary
-                   (when (derived-mode-p 'gnus-summary-mode)
-                     (gnus-summary-reselect-current-group (and all (list 4)))))))))))
-      ;; Gnus may replace the Summary buffer while reselecting.  Native
-      ;; articles also retain a separate current-Summary reference for
-      ;; forwarded keys; repair it together with the thread reader's link.
-      (let ((replacement (get-buffer (format "*Summary %s*"
-                                              group))))
-        (when replacement
-          (with-current-buffer replacement
-            (gnus-summary-refresh--restore-view view))
-          (dolist (buffer (buffer-list))
-            (with-current-buffer buffer
-              (when (and (derived-mode-p 'gnus-article-mode)
-                         (equal gnus-newsgroup-name group))
-                (setq gnus-article-current-summary replacement
-                      gnus-summary-buffer replacement))
-              (when (and (local-variable-p 'gnus-thread-reader--summary)
-                         (eq gnus-thread-reader--summary summary))
-                (setq gnus-thread-reader--summary replacement)))))))))
+(defun gnus-summary-refresh--marks ()
+  "Return Summary marks keyed by component address, including hidden rows."
+  (let (marks)
+    (dolist (data gnus-newsgroup-data)
+      (let* ((number (gnus-data-number data))
+             (source (if (string-prefix-p "nnvirtual:" gnus-newsgroup-name)
+                         (nnvirtual-find-group-art (gnus-group-real-name gnus-newsgroup-name) number)
+                       (cons gnus-newsgroup-name number))))
+        (when source (push (cons source (gnus-data-mark data)) marks))))
+    marks))
 
+(defun gnus-summary-refresh--rebuild-after-scan ()
+  "Update this Summary in place from caches, without exiting or closing a group."
+  (gnus-dispatch-assert-main)
+  (require 'gnus-backend-state)
+  (let* ((group gnus-newsgroup-name)
+         (all (eq gnus-newsgroup-display #'gnus-not-ignore))
+         (view (gnus-summary-refresh--save-view))
+         (marks (gnus-summary-refresh--marks))
+         (gnus-read-cached t)
+         (gnus-auto-select-first nil)
+         (gnus-large-newsgroup nil)
+         (gnus-fetch-old-headers nil)
+         (gnus-summary-preserve-article t))
+    ;; Commit only user changes since the previous projection.  Do not send
+    ;; remote marks, cross-reference writes, EXPUNGE, or group-exit hooks.
+    (dolist (item marks)
+      (when-let* ((previous (assoc (car item) gnus-summary-refresh--mark-baseline))
+                  ((not (eq (cdr item) (cdr previous))))
+                  (info (gnus-get-info (caar item))))
+        (gnus-backend-state--apply-mark info (cdar item) (cdr item))))
+    (when (gnus-select-newsgroup group (and all '(4)))
+      (setq gnus-newsgroup-active (copy-tree (gnus-active group))
+            gnus-newsgroup-highest (cdr gnus-newsgroup-active))
+      (gnus-summary-initial-limit (and all '(4)))
+      (gnus-summary-prepare)
+      (gnus-summary-maybe-hide-threads)
+      (gnus-set-mode-line 'summary)
+      (setq gnus-summary-refresh--mark-baseline (gnus-summary-refresh--marks)
+            gnus-summary-refresh--initial-limits (copy-tree gnus-newsgroup-limits))
+      (gnus-summary-refresh--restore-view view))))
 
 (defun gnus-summary-refresh--rebuild-visible ()
   "Refresh visible summaries without discarding an active user limit."

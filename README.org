@@ -19,7 +19,7 @@ generation and byte/native compilation, and applies the native C patches. There 
 Add this flake input:
 
 #+begin_src nix
-inputs.commercial-emacs.url = "github:DzmingLi/commercial-emacs-overlay/v0.4.0";
+inputs.commercial-emacs.url = "github:DzmingLi/commercial-emacs-overlay";
 #+end_src
 
 Then select the editor from the overlay and derive packages from it:
@@ -40,6 +40,68 @@ separate commercial-gnus Lisp package from your configuration.
 The overlay deliberately exports a named editor instead of changing every
 Emacs derivation in nixpkgs. It targets GNU Emacs 31; other versions require
 reviewing the C patch against their sources.
+
+* Integrated reading pipeline (0.5.0)
+The distribution now includes =gnus-thread-reader=, =gnus-reading=,
+=gnus-webkit-preview= and =gnus-attachment-pane=. Remove their separately
+installed copies so older packages cannot shadow the built-in modules.
+The generic =thread-reader= data/view library remains a separate Lisp module
+inside this distribution; its source-parser interfaces remain available.
+
+#+begin_src emacs-lisp
+(require 'gnus-thread-reader)
+(gnus-thread-reader-global-summary-mode 1)
+(gnus-attachment-pane-mode 1)
+(setq gnus-reading-renderer-function
+      (lambda (snapshot)
+        (if (and (display-graphic-p)
+                 (string-prefix-p "nnimap+news-letter:" (plist-get snapshot :group)))
+            'webkit 'text)))
+#+end_src
+
+=RET= opens a thread in the Summary's owned reading slot. Text, optional
+HTML and attachments use that same slot. =gnus-webkit-preview-open-thread=
+can be bound to a key for manual HTML display. Renderers receive loaded
+snapshots; they do not select articles, fetch mail or apply marks. Gnus's
+controller handles visits, navigation, late results and read state. Text
+and HTML attachments own exported files independently of MIME parser buffers.
+
+HTML uses the optional external =emacs-webkit= native module. Apply
+=patches/emacs-webkit-main-thread-api.patch= to the module: its exported C
+functions reject worker-thread calls before touching GTK. This patch is
+independent of the Emacs main-loop patches and the Gnus dispatcher.
+
+=gnus-dispatch= uses a main-thread command event, not timer affinity, to
+publish work. Jobs have deadlines, cancellation and one terminal completion.
+IMAP scan, body and mark operations use persistent batch Emacs processes,
+one serial connection owner per select method. Credentials stay out of argv;
+workers load only a minimal =gnus-backend-worker-init-file=, if configured.
+This file should provide authentication without loading the interactive init.
+Existing =auth-sources= and method parameters are copied as data.
+
+The frontend retains native newsrc/read/mark state. It checks session,
+UIDVALIDITY and source identity before committing results, rebases local
+marks over older scans, and checks every IMAP STORE acknowledgement. Explicit
+Gnus exit waits for queued mark writes before releasing the session; ordinary
+reading and marking enqueue work and return. Failed writes are reported and
+retained in the current session's pending mark journal; that journal is not a
+durable outbox across Emacs restarts.
+
+This is a staged backend migration: only =nnimap= uses process isolation.
+Other source backends still use the legacy worker bridge, with main-thread
+publication. Explicit native commands such as move/delete/expunge and the
+native Article preview compatibility command can still do synchronous I/O.
+Summary refresh now rebuilds in place from caches without exit/reselect or
+remote mark writes. It retains source-based cursor/window anchors and skips
+views with user-applied limits; native default thread folding is reapplied.
+See =ASYNC-DESIGN.org= for the target architecture and remaining boundaries.
+
+Run =make check= for the combined regression suite. For real GUI integration,
+start a disposable graphical Emacs =-Q= with =lisp/gnus= and the guarded WebKit
+package on =load-path=, then load =tests/gnus-main-publication-gui-test.el= or
+=tests/gnus-reading-gui-test.el=. Each test exits its own Emacs; do not load
+these test scripts in an existing daemon. The latter uses a synthetic mail
+actor and real WebKit/attachment windows, without accessing personal mail.
 
 * Native selected-window border
 The overlay ports Commercial Emacs's =window-border-mode= into GNU Emacs
@@ -85,7 +147,8 @@ misses do not mark articles read or nonexistent. Background re-entry also
 skips IMAP expunge operations.
 
 The scanner selects eligible groups on the main thread, then resolves
-backend capabilities and scans real sources serially in a worker. Virtual
+backend capabilities and scans remaining legacy sources serially in a worker.
+IMAP uses the isolated actor described above. Virtual
 groups are projections of source state: their counts are computed on the
 main thread without rebuilding a reader's live article mapping. Group
 buffer updates and =gnus-after-getting-new-news-hook= run on the main

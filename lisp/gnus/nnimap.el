@@ -34,6 +34,7 @@
 (require 'cl-seq)
 (require 'json)
 (defvar gnus-background-get-unread-articles)
+(defvar gnus-backend-worker-p nil)
 
 (autoload 'auth-source-forget+ "auth-source")
 (autoload 'auth-source-search "auth-source")
@@ -333,8 +334,9 @@ during splitting, which may be slow."
   "Fill missing header snapshots on the scanning worker before publication."
   (with-temp-buffer
     (let ((nntp-server-buffer (current-buffer)))
-      (when (and gnus-background-get-unread-articles
-                 (not (eq (current-thread) main-thread)))
+      (when (or gnus-backend-worker-p
+                (and gnus-background-get-unread-articles
+                     (not (eq (current-thread) main-thread))))
     (dolist (info infos)
       (let* ((full (gnus-info-group info)) (group (gnus-group-real-name full))
              (cache (cdr (nnimap--header-cache group server)))
@@ -1349,7 +1351,7 @@ If LIMIT, first try to limit the search to the N last articles."
 
 (deffoo nnimap-request-set-mark (group actions &optional server)
   (when (nnimap-change-group group server)
-    (let (sequence)
+    (let (sequence sequences)
       (nnimap-with-process-buffer
 	;; Just send all the STORE commands without waiting for
 	;; response.  If they're successful, they're successful.
@@ -1370,11 +1372,20 @@ If LIMIT, first try to limit the search to the N last articles."
 				 ((eq action 'del) "-")
 				 ((eq action 'add) "+")
 				 ((eq action 'set) ""))
-				(mapconcat #'identity flags " ")))))))
+				(mapconcat #'identity flags " ")))
+                (push sequence sequences)))))
 	;; Wait for the last command to complete to avoid later
 	;; synchronization problems with the stream.
-	(when sequence
-	  (nnimap-wait-for-response sequence))))))
+	(if gnus-backend-worker-p
+            ;; The actor must not acknowledge a write merely because its
+            ;; last tag arrived; each STORE can independently return NO.
+            (progn
+              (dolist (tag (nreverse sequences))
+                (unless (nnimap-ok-p (nnimap-get-response tag))
+                  (error "IMAP mark update was not confirmed")))
+              t)
+          (when sequence
+	    (nnimap-wait-for-response sequence)))))))
 
 (deffoo nnimap-request-accept-article (group &optional server _last)
   (unless group

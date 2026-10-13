@@ -37,6 +37,7 @@
 (require 'time-date)
 (require 'mm-url)
 (require 'subr-x)
+(declare-function gnus-backend-flush-marks "gnus-backend" ())
 
 (eval-when-compile
   (with-suppressed-warnings ((lexical features))
@@ -4425,6 +4426,9 @@ The hook `gnus-exit-gnus-hook' is called before actually exiting."
     (gnus--abort-on-unsaved-message-buffers)
     ;; Offer to save data from non-quitted summary buffers.
     (gnus-offer-save-summaries)
+    ;; Summary saving can enqueue isolated IMAP writes.  Finish those before
+    ;; clearing the session and closing its connection owners.
+    (when (fboundp 'gnus-backend-flush-marks) (gnus-backend-flush-marks))
     ;; Save the newsrc file(s).
     (gnus-save-newsrc-file)
     ;; Kill-em-all.
@@ -4463,6 +4467,7 @@ The hook `gnus-exit-gnus-hook' is called before actually exiting."
       (gnus-dribble-enter
        ";;; Gnus was exited on purpose without saving the .newsrc files."))
     (gnus-dribble-save)
+    (when (fboundp 'gnus-backend-flush-marks) (gnus-backend-flush-marks))
     (gnus-close-backends)
     (gnus-clear-system)
     (gnus-kill-buffer gnus-group-buffer)

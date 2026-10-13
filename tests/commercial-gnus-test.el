@@ -366,12 +366,14 @@
       (gnus-request-background-refresh 2)
       (should (= scheduled 1))
       (funcall callback)
+      (gnus-dispatch-drain)
       (should (= called 2))
       (should-not gnus-background-refresh-timer)
       (setq called nil)
       (gnus-request-background-refresh 2)
       (setq gnus-newsrc-hashtb (make-hash-table))
       (funcall callback)
+      (gnus-dispatch-drain)
       (should-not called))))
 
 (ert-deftest commercial-gnus-native-entry-owns-cache-context ()
@@ -448,7 +450,7 @@
       (should (equal received (list info))))))
 
 (ert-deftest commercial-gnus-cached-virtual-view-fills-and-preserves-reading ()
-  ;; Exercise real startup, virtual mapping, header retrieval, re-entry,
+  ;; Exercise real startup, virtual mapping, header retrieval, in-place updates,
   ;; mark propagation and view restoration.  Only the RSS network boundary
   ;; and automatic scan scheduling are replaced; user state is isolated.
   (require 'nnrss)
@@ -478,6 +480,10 @@
           (cl-letf (((symbol-function 'gnus-request-background-refresh) #'ignore)
                     ((symbol-function 'nnrss-check-group)
                      (lambda (&rest _) (ert-fail "Foreground RSS fetch")))
+                    ((symbol-function 'gnus-summary-exit)
+                     (lambda (&rest _) (ert-fail "Refresh exited the group")))
+                    ((symbol-function 'gnus-request-set-mark)
+                     (lambda (&rest _) (ert-fail "Refresh sent remote marks")))
                     ((symbol-function 'nnrss-possibly-change-group)
                      (lambda (&rest _)
                        (setq nnrss-group "feed" nnrss-group-min 1

@@ -7,7 +7,7 @@ lisp/gnus/commercial-gnus-loaddefs.el: $(filter-out lisp/gnus/commercial-gnus-lo
 	$(EMACS) --batch -Q --eval '(progn (require (quote loaddefs-gen)) (loaddefs-generate "lisp/gnus" "lisp/gnus/commercial-gnus-loaddefs.el"))'
 
 check: all
-	$(EMACS) --batch -Q -L lisp/gnus -l tests/commercial-gnus-test.el -l tests/nnimap-scan-test.el -l tests/nnfeed-identity-test.el -l tests/nnimap-header-cache-test.el -l tests/nnimap-wait-test.el -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -Q -L lisp/gnus -l tests/gnus-dispatch-test.el -l tests/gnus-backend-test.el -l tests/gnus-backend-state-test.el -l tests/gnus-reading-test.el -l tests/gnus-thread-reader-test.el -l tests/gnus-thread-reader-identity-test.el -l tests/gnus-thread-reader-async-test.el -l tests/gnus-webkit-preview-test.el -l tests/gnus-webkit-thread-integration-test.el -l tests/gnus-attachment-pane-test.el -l tests/commercial-gnus-test.el -l tests/nnimap-scan-test.el -l tests/nnfeed-identity-test.el -l tests/nnimap-header-cache-test.el -l tests/nnimap-wait-test.el -f ert-run-tests-batch-and-exit
 
 # SHR tests require an Emacs source tree with the overlay patch applied.
 check-shr:

@@ -38,6 +38,9 @@
 (autoload 'gnus-summary-insert-subject "gnus-sum")
 (autoload 'gnus-summary-setup-buffer "gnus-sum")
 (autoload 'gnus-summary-read-group-1 "gnus-sum")
+(declare-function gnus-backend-process-p "gnus-backend" (method))
+(declare-function gnus-backend-request "gnus-backend"
+                  (method operation data success failure &rest options))
 
 (defcustom gnus-open-server-hook nil
   "Hook called just before opening connection to the news server."
@@ -573,6 +576,20 @@ Valid statuses include `subscribe' and `unsubscribe'."
        (nth 1 gnus-command-method)))))
 
 (defun gnus-request-set-mark (group action)
+  "Set backend marks through its actor when process isolation is enabled."
+  (let ((method (gnus-find-method-for-group group)))
+    (if (and (fboundp 'gnus-backend-process-p) (gnus-backend-process-p method))
+        (let ((session gnus-newsrc-hashtb)
+              (epoch (cdr (assq 'uidvalidity (gnus-info-params (gnus-get-info group))))))
+          (gnus-backend-request
+           method 'marks (list :group group :epoch epoch :action (copy-tree action))
+           (lambda (_) (gnus-run-hook-with-args gnus-after-set-mark-hook group action))
+           (lambda (failure) (message "Gnus marks not confirmed: %s" failure))
+           :valid (lambda () (eq session gnus-newsrc-hashtb)))
+          nil)
+      (gnus-request-set-mark-synchronously group action))))
+
+(defun gnus-request-set-mark-synchronously (group action)
   "Set marks on articles in the back end."
   (let ((gnus-command-method (gnus-find-method-for-group group)))
     (if (not (gnus-check-backend-function
