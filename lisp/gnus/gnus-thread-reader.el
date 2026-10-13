@@ -19,6 +19,7 @@
 (require 'gnus-dispatch)
 (require 'gnus-reading)
 (require 'gnus-backend)
+(require 'gnus-backend-state)
 (require 'thread-reader)
 (require 'gnus-sum)
 (require 'gnus-art)
@@ -739,7 +740,17 @@ on the main thread."
       (with-current-buffer (gnus-thread-reader--source)
         (save-excursion
           (gnus-summary-mark-article number mark)
+          (setq mark (gnus-summary-article-mark number))
+          (unless (characterp mark)
+            (user-error "Gnus could not restore the original article's mark"))
           (gnus-set-mode-line 'summary))))
+    ;; Restored rows are absent from the last refresh baseline.  Persist
+    ;; this explicit action before a new unread-only projection drops it.
+    (let* ((id (gnus-thread-reader-current-article-id))
+           (source (gnus-thread-reader--remember-source
+                    id (gethash id gnus-thread-reader--headers)))
+           (info (and source (gnus-get-info (car source)))))
+      (when info (gnus-backend-state--apply-mark info (cdr source) mark)))
     (gnus-thread-reader--render)))
 
 (defun gnus-thread-reader-mark-read ()

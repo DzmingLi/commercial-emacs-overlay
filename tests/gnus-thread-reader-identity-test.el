@@ -199,3 +199,69 @@
       (should (equal (gnus-thread-reader--check-source-epoch source) "old"))
       (setf (gnus-info-params info) '((uidvalidity . "new")))
       (should-error (gnus-thread-reader--check-source-epoch source) :type 'user-error))))
+
+(ert-deftest gnus-reader-tick-removed-row-survives-next-unread-refresh ()
+  ;; Summary stays alive throughout.  The original row is gone and its old
+  ;; ordinal now belongs to a different article; use the native mark path.
+  (gnus-reader-identity-test--session
+    (require 'gnus-summary-refresh)
+    (let* ((gnus-use-cache nil)
+           (gnus-active-hashtb (make-hash-table :test #'equal))
+           (gnus-newsrc-hashtb (make-hash-table :test #'equal))
+           (info (gnus-info-make "nnrss:real.feed" 2 '(7) nil '(nnrss ""))))
+      (puthash "nnvirtual:identity-test" '(1 . 100) gnus-active-hashtb)
+      (puthash "nnrss:real.feed" (list 1 info) gnus-newsrc-hashtb)
+      (setq gnus-thread-reader--session gnus-newsrc-hashtb)
+      (cl-letf (((symbol-function 'nnvirtual-find-group-art)
+                 (lambda (_group number)
+                   (cons "nnrss:real.feed" (pcase number (10 99) (33 7)))))
+                ((symbol-function 'gnus-request-update-mark)
+                 (lambda (_group _number mark) mark))
+                ((symbol-function 'gnus-set-mode-line) #'ignore)
+                ((symbol-function 'gnus-thread-reader--render) #'ignore)
+                ((symbol-function 'gnus-summary-initial-limit) #'ignore)
+                ((symbol-function 'gnus-select-newsgroup)
+                 (lambda (&rest _)
+                   ;; The next selection projects native source state,
+                   ;; just as an unread-only group selection does.
+                   (setq gnus-newsgroup-marked
+                         (and (range-member-p 7 (cdr (assq 'tick (gnus-info-marks info)))) '(33))
+                         gnus-newsgroup-unreads '(10)
+                         gnus-newsgroup-headers
+                         (if gnus-newsgroup-marked (list unrelated current) (list unrelated))
+                         gnus-newsgroup-limit
+                         (mapcar #'mail-header-number gnus-newsgroup-headers)
+                         gnus-newsgroup-articles gnus-newsgroup-limit
+                         gnus-newsgroup-threads nil)
+                   t)))
+        (with-current-buffer summary
+          (setq-local gnus-summary-buffer summary
+                      gnus-newsgroup-headers (list unrelated)
+                      gnus-newsgroup-threads nil
+                      gnus-newsgroup-data nil
+                      gnus-newsgroup-limit '(10)
+                      gnus-newsgroup-unreads '(10)
+                      gnus-show-threads t)
+          (gnus-update-format-specifications 'summary 'summary-mode 'summary-dummy)
+          (gnus-update-summary-mark-positions)
+          (gnus-dependencies-add-header unrelated gnus-newsgroup-dependencies t)
+          (gnus-summary-prepare)
+          (should-not (gnus-summary-article-header 33))
+          (should-not (assoc '("nnrss:real.feed" . 7) gnus-summary-refresh--mark-baseline)))
+        (gnus-thread-reader-tick)
+        (with-current-buffer summary
+          (should (eq (gnus-summary-article-mark 33) gnus-ticked-mark))
+          (gnus-summary-refresh--rebuild-after-scan)
+          (should (eq (gnus-summary-article-mark 33) gnus-ticked-mark))
+          (should (eq (gnus-summary-article-mark 10) gnus-unread-mark)))
+        (should (range-member-p 7 (cdr (assq 'tick (gnus-info-marks info)))))
+        (should-not (range-member-p 7 (gnus-info-read info)))
+        (should-not (range-member-p 99 (cdr (assq 'tick (gnus-info-marks info)))))
+        (gnus-thread-reader-mark-unread)
+        (should-not (range-member-p 7 (gnus-info-read info)))
+        (should-not (range-member-p 7 (cdr (assq 'tick (gnus-info-marks info)))))
+        (gnus-thread-reader-dormant)
+        (should (range-member-p 7 (cdr (assq 'dormant (gnus-info-marks info)))))
+        (gnus-thread-reader-mark-read)
+        (should (range-member-p 7 (gnus-info-read info)))
+        (should-not (range-member-p 7 (cdr (assq 'dormant (gnus-info-marks info)))))))))
