@@ -1,6 +1,6 @@
 --- a/src/keyboard.c
 +++ b/src/keyboard.c
-@@ -4910,5 +4910,13 @@
+@@ -4910,4 +4910,12 @@
  timer_check (void)
  {
 +  /* accept-process-output runs this on Lisp workers too.  Timers publish
@@ -13,26 +13,23 @@
 +
    struct timespec nexttime;
    Lisp_Object timers, idle_timers;
- 
 --- a/src/pgtkterm.c
 +++ b/src/pgtkterm.c
-@@ -3946,9 +3946,15 @@
- 
-   if (context_acquired)
-     {
+@@ -3949,4 +3949,10 @@
 -      while (g_main_context_pending (context))
+-	{
+-	  g_main_context_dispatch (context);
+-	}
 +      /* WebKit sources can remain ready after dispatch.  Return to the
 +         Lisp command loop even if the context never becomes empty.  */
 +      gint64 deadline = g_get_monotonic_time () + 4000;
 +      unsigned dispatches = 0;
 +      while (dispatches++ < 64 && g_main_context_pending (context))
- 	{
- 	  g_main_context_dispatch (context);
++        {
++          g_main_context_dispatch (context);
 +          if (g_get_monotonic_time () >= deadline)
 +            break;
- 	}
-     }
- 
++        }
 --- a/src/xgselect.c
 +++ b/src/xgselect.c
 @@ -277,8 +277,17 @@
