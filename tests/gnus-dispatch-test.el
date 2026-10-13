@@ -71,8 +71,12 @@
       (should-not owner)
       ;; Patched Emacs defers timers until main resumes; stock GNU Emacs
       ;; may already have enqueued the timeout during the worker wait.
-      (accept-process-output nil 0.03)
-      (gnus-dispatch-drain)
+      (let ((deadline (+ (float-time) 2)))
+        (while (and (not owner) (< (float-time) deadline))
+          ;; Consume wakeups just as the main command loop does.  A fixed
+          ;; I/O sleep can return early while those events are still pending.
+          (read-event nil nil 0.02)
+          (gnus-dispatch-drain)))
       (should (eq owner main-thread))
       (should (eq (gnus-dispatch-job-state job) 'cancelled)))))
 
