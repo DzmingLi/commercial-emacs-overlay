@@ -5,6 +5,7 @@
       emacs31-pgtk-commercial = prev.emacs31-pgtk.overrideAttrs (old: {
         patches = (old.patches or [ ]) ++ [
           ./patches/gnu-emacs31-glib-worker-wait.patch
+          ./patches/gnu-emacs31-main-loop.patch
           ./patches/gnu-emacs31-shr-stale-image.patch
           ./patches/gnu-emacs31-window-border.patch
         ];
@@ -18,7 +19,7 @@
         passthru = (old.passthru or { }) // {
           commercialGnusRevision = "bf4184f985d0674a7c03c12eb33b66ac833d9e29";
           commercialGnusVersion = "0.3.6";
-          commercialEmacsOverlayVersion = "0.4.5";
+          commercialEmacsOverlayVersion = "0.4.6";
         };
       });
     };

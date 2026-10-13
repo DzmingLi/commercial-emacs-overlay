@@ -37,7 +37,7 @@
 +     converting strings or disposing of temporary buffers.  Reading a
 +     graphical terminal dispatches GTK/WebKit callbacks, which must stay
 +     on the main thread even when the worker owns the Lisp lock.  */
-+  if (!main_thread_p (current_thread))
++  if (!main_thread_p (current_thread) || fatal_error_in_progress)
 +    return 0;
 +
    int nread = 0;
@@ -50,7 +50,7 @@
 +  /* Leave the pending flag set for the main loop.  Deferring only the
 +     input hook would lose this notification and still run atimers from
 +     a worker thread.  */
-+  if (!main_thread_p (current_thread))
++  if (!main_thread_p (current_thread) || fatal_error_in_progress)
 +    return;
 +
    pending_signals = false;

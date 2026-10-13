@@ -147,7 +147,30 @@ WebKit's module must also defer user-pointer finalizers to the main GTK
 loop: Emacs can garbage-collect such pointers on a Lisp worker. The core
 input guards cannot protect a module that calls GTK directly during GC.
 
-The overlay applies this patch while building the editor. Lisp hot-loading
+The additional =patches/gnu-emacs31-main-loop.patch= prevents an I/O wait
+on a Lisp worker from executing ordinary or idle timers and pending
+funcalls. These callbacks stay queued for the main thread, where reader
+body publication and the first WebKit preview can safely run. A captured
+live failure showed WebKit's process-launch completion asserting that its
+main RunLoop belonged to another native thread. A controlled timer test
+reproduced that scheduling error on the old core.
+
+Both PGTK input reads and GLib-aware I/O waits return to Lisp after at most
+64 dispatch rounds or a four-millisecond budget. Pending events are kept
+for the next turn; one expensive native callback can still exceed that
+budget. Fatal cleanup skips timer and graphical input callbacks, avoiding
+recursive dispatch into a failed WebKit callback during process cleanup.
+
+=tests/run-main-loop-tests.py= runs a timer ownership check, a permanently
+ready GLib source, a cold WebKit preview scheduled during worker I/O,
+the existing worker/GC stress test, and bounded fatal cleanup. It uses
+separate processes with temporary state and no personal configuration;
+core dumps are disabled for its fatal-cleanup fixture. Run
+=make check-main-loop EMACS=/path/to/patched/emacs WEBKIT_DIRECTORY=/path/to/webkit/lisp EMACS_MODULE_INCLUDE=/path/to/emacs/include=.
+The C fixture requires a compiler and GLib development metadata through
+=pkg-config=. The Python runner also accepts explicit =--glib-flags=.
+
+The overlay applies these patches while building the editor. Lisp hot-loading
 cannot apply a C patch. Non-Nix installations must replace the built-in
 Gnus tree and apply this patch to GNU Emacs 31 sources before building.
 

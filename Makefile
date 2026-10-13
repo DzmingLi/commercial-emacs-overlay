@@ -1,6 +1,6 @@
 EMACS ?= emacs
 
-.PHONY: all check check-shr check-window-border check-glib-worker
+.PHONY: all check check-shr check-window-border check-glib-worker check-main-loop
 all: lisp/gnus/commercial-gnus-loaddefs.el
 
 lisp/gnus/commercial-gnus-loaddefs.el: $(filter-out lisp/gnus/commercial-gnus-loaddefs.el,$(wildcard lisp/gnus/*.el))
@@ -29,3 +29,10 @@ check-glib-worker:
 	cat "$$test_dir/log"; \
 	grep -q 'glib-worker-gui-test: PASS' "$$test_dir/log"; \
 	grep -Eq 'glib-main-thread-probe: [1-9][0-9]* main-thread dispatches' "$$test_dir/log"
+
+# These checks require a graphical build with the native main-loop patch.
+# Supply WebKit's Lisp directory and Emacs's module-header directory.
+check-main-loop:
+	python3 tests/run-main-loop-tests.py --emacs "$(EMACS)" \
+	  --webkit-directory "$(WEBKIT_DIRECTORY)" \
+	  --module-include "$(EMACS_MODULE_INCLUDE)" --cc "$(CC)"
