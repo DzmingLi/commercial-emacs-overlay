@@ -111,6 +111,26 @@ In a live unpatched PGTK session, a background scan coincided with a GLib
 ownership assertion, a spinning worker and an unresponsive main thread.
 Lisp-only batch tests do not exercise this GUI path.
 
+Both paths into GUI events are guarded: =xg_select= during I/O waits and
+=gobble_input=/=process_pending_signals= at Lisp interruption points.
+The latter can run during IMAP's UTF-7 conversion or temporary-buffer
+cleanup. A worker must leave pending input for the main thread; otherwise
+WebKit's thread-affinity assertions can abort the entire editor.
+
+=tests/glib-worker-gui-test.el= exercises real WebKit creation/destruction
+while three workers convert strings and wait for I/O. Run it only in a
+fresh graphical Emacs with no personal init file. Compile the accompanying
+=tests/glib-main-thread-probe.c= as a shared library with =-ldl -pthread=,
+then set =LD_PRELOAD= to that library and =XDG_STATE_HOME= to a temporary
+directory. Supply WebKit on Emacs's load path. The probe exits with status
+76 before any worker dispatches a GLib callback. A passing run must report
+=PASS= and a positive number of main-thread dispatches, then exit zero.
+The =make check-glib-worker EMACS=/path/to/patched/emacs= target compiles
+the probe, isolates state, runs the test and checks those results.
+WebKit's module must also defer user-pointer finalizers to the main GTK
+loop: Emacs can garbage-collect such pointers on a Lisp worker. The core
+input guards cannot protect a module that calls GTK directly during GC.
+
 The overlay applies this patch while building the editor. Lisp hot-loading
 cannot apply a C patch. Non-Nix installations must replace the built-in
 Gnus tree and apply this patch to GNU Emacs 31 sources before building.
