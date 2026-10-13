@@ -77,6 +77,12 @@ source ranges and headers. Sources without cached ranges appear after
 scanning completes. An initially empty virtual Summary stays open while
 waiting, and automatic article selection is suppressed during cached entry.
 Selecting an article explicitly retains normal backend behavior.
+IMAP header snapshots are filled on the scanning worker and saved privately,
+scoped to server, mailbox and UIDVALIDITY. Cached native/virtual Summary
+entry and refresh never SELECT an IMAP mailbox or fetch headers over the
+network. Missing snapshot headers appear when their scan completes; cache
+misses do not mark articles read or nonexistent. Background re-entry also
+skips IMAP expunge operations.
 
 The scanner selects eligible groups on the main thread, then resolves
 backend capabilities and scans real sources serially in a worker. Virtual

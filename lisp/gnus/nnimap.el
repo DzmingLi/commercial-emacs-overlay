@@ -32,6 +32,7 @@
 (require 'utf7)
 (require 'nnmail)
 (require 'cl-seq)
+(require 'json)
 
 (autoload 'auth-source-forget+ "auth-source")
 (autoload 'auth-source-search "auth-source")
@@ -267,6 +268,83 @@ during splitting, which may be slow."
 	  params)
     (format "%s" (nreverse params))))
 
+(defvar nnimap-header-cache-directory
+  (expand-file-name "nnimap-header-cache/" gnus-directory)
+  "Directory for private IMAP header snapshots, without article bodies.")
+(defvar nnimap--header-caches (make-hash-table :test #'equal))
+
+(defun nnimap--header-cache (group server)
+  "Return GROUP's header snapshot, scoped to SERVER and UIDVALIDITY."
+  (let* ((info (gnus-get-info (gnus-group-prefixed-name group `(nnimap ,server))))
+         (validity (and info (cdr (assq 'uidvalidity (gnus-info-params info)))))
+         (key (list server group validity)))
+    (or (gethash key nnimap--header-caches)
+        (let* ((file (expand-file-name (concat (secure-hash 'sha256 (prin1-to-string key)) ".json")
+                                      nnimap-header-cache-directory))
+               (headers (make-hash-table :test #'eql)))
+          (when (file-readable-p file)
+            (condition-case nil
+                (with-temp-buffer
+                  (insert-file-contents file)
+                  (let ((data (json-parse-buffer :object-type 'plist :array-type 'list)))
+                    (when (equal (plist-get data :version) 1)
+                      (dolist (entry (plist-get data :headers))
+                        (when (and (integerp (car entry)) (stringp (cadr entry)))
+                          (puthash (car entry) (cadr entry) headers))))))
+              (error nil)))
+          (puthash key (cons file headers) nnimap--header-caches)))))
+
+(defun nnimap--cache-headers (group server)
+  "Store transformed HEAD records in the current buffer without changing marks."
+  (let* ((cache (nnimap--header-cache group server)) (headers (cdr cache)) changed)
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward "^21[12] \\([0-9]+\\) .*\n" nil t)
+        (let ((number (string-to-number (match-string 1))) (start (match-beginning 0)))
+          (when (re-search-forward "^\\.\r?$" nil t)
+            (forward-line 1)
+            (puthash number (buffer-substring-no-properties start (point)) headers)
+            (setq changed t)))))
+    (when changed
+      (make-directory nnimap-header-cache-directory t)
+      (set-file-modes nnimap-header-cache-directory #o700)
+      (let ((temp (make-temp-file (expand-file-name ".headers-" nnimap-header-cache-directory)))
+            (coding-system-for-write 'utf-8-unix) entries)
+        (unwind-protect
+            (progn
+              (maphash (lambda (number text) (push (vector number text) entries)) headers)
+              (set-file-modes temp #o600)
+              (with-temp-file temp
+                (insert (json-serialize (list :version 1 :headers (vconcat entries)))))
+              (rename-file temp (car cache) t))
+          (when (file-exists-p temp) (delete-file temp)))))))
+
+(defun nnimap-retrieve-cached-headers (articles group server)
+  "Read cached HEAD records without opening an IMAP connection."
+  (let ((headers (cdr (nnimap--header-cache group server))))
+    (with-current-buffer nntp-server-buffer
+      (erase-buffer)
+      (dolist (number articles)
+        (when-let* ((text (gethash number headers))) (insert text)))))
+  'headers)
+
+(defun nnimap--prefetch-group-headers (server infos)
+  "Fill missing header snapshots on the scanning worker before publication."
+  (with-temp-buffer
+    (let ((nntp-server-buffer (current-buffer)))
+      (when (and gnus-background-get-unread-articles
+                 (not (eq (current-thread) main-thread)))
+    (dolist (info infos)
+      (let* ((full (gnus-info-group info)) (group (gnus-group-real-name full))
+             (cache (cdr (nnimap--header-cache group server)))
+             (existing (range-list-difference (range-uncompress (gnus-active full))
+                                             (cdr (assq 'unexist (gnus-info-marks info)))))
+             (missing (cl-remove-if (lambda (n) (gethash n cache)) existing)))
+        (when missing
+          (condition-case err
+              (let ((gnus-read-cached nil)) (nnimap-retrieve-headers missing group server))
+            (error (gnus-message 2 "IMAP header snapshot: %s" (error-message-string err)))))))))))
+
 (defvar nnimap--max-retrieve-headers 200)
 (defvar nnimap--mutex-alist nil
   "Cannot have two threads concurrently munging `nnimap-process-buffer-key'.")
@@ -295,32 +373,35 @@ during splitting, which may be slow."
              ,@body))))))
 
 (deffoo nnimap-retrieve-headers (articles &optional group server _fetch-old)
-  (nnimap-with-context nntp-server-buffer
-    (erase-buffer)
-    (when (nnimap-change-group group server)
-      (nnimap-with-process-buffer
-        ;; If we have a lot of ranges, split them up to avoid
-        ;; generating too-long lines.  (The limit is 8192 octets,
-        ;; and this should guarantee that it's (much) shorter than
-        ;; that.)  We don't stream the requests, since the server
-        ;; may respond to the requests out-of-order:
-        ;; https://datatracker.ietf.org/doc/html/rfc3501#section-5.5
-        (dolist (ranges (seq-split (gnus-compress-sequence articles t)
-                                   nnimap--max-retrieve-headers))
-          (nnimap-wait-for-response
-	   (nnimap-send-command
-	    "UID FETCH %s %s"
-	    (nnimap-article-ranges ranges)
-	    (nnimap-header-parameters))
-           t))
-	(unless (process-live-p (get-buffer-process (current-buffer)))
-	  (error "IMAP server %S closed connection" nnimap-address))
-	(nnimap-transform-headers)
-	(nnheader-remove-cr-followed-by-lf)
-        (let ((from-buffer (current-buffer)))
-          (with-current-buffer nntp-server-buffer
-            (insert-buffer-substring from-buffer)))))
-    'headers))
+  (if gnus-read-cached
+      (nnimap-retrieve-cached-headers articles group (or server (nnoo-current-server 'nnimap)))
+    (nnimap-with-context nntp-server-buffer
+      (erase-buffer)
+      (when (nnimap-change-group group server)
+	(nnimap-with-process-buffer
+	  ;; If we have a lot of ranges, split them up to avoid
+	  ;; generating too-long lines.  (The limit is 8192 octets,
+	  ;; and this should guarantee that it's (much) shorter than
+	  ;; that.)  We don't stream the requests, since the server
+	  ;; may respond to the requests out-of-order:
+	  ;; https://datatracker.ietf.org/doc/html/rfc3501#section-5.5
+	  (dolist (ranges (seq-split (gnus-compress-sequence articles t)
+				     nnimap--max-retrieve-headers))
+	    (nnimap-wait-for-response
+	     (nnimap-send-command
+	      "UID FETCH %s %s"
+	      (nnimap-article-ranges ranges)
+	      (nnimap-header-parameters))
+	     t))
+	  (unless (process-live-p (get-buffer-process (current-buffer)))
+	    (error "IMAP server %S closed connection" nnimap-address))
+	  (nnimap-transform-headers)
+	  (nnheader-remove-cr-followed-by-lf)
+	  (let ((from-buffer (current-buffer)))
+	    (with-current-buffer nntp-server-buffer
+	      (insert-buffer-substring from-buffer)
+	      (nnimap--cache-headers group (or server (nnoo-current-server 'nnimap)))))))
+      'headers)))
 
 (defun nnimap-transform-headers ()
   "Transform server's FETCH response into parsable headers."
@@ -921,30 +1002,40 @@ the key of the front-line assoc list to incorporate SERVER."
     (nreverse parts)))
 
 (deffoo nnimap-request-group (group &optional server dont-check info)
-  (let ((result (nnimap-change-group
-		 ;; Don't SELECT the group if we're going to select it
-		 ;; later, anyway.
-		 (when (or dont-check
-			   (not (assoc group nnimap-current-infos)))
-		   group)
-		 server))
-	(info (when info (list info)))
-	active)
-    (nnimap-with-context nntp-server-buffer
-      (when result
-	(when (or (not dont-check)
-		  (not (setq active (nth 2 (assoc group nnimap-current-infos)))))
-	  (let ((sequences (nnimap-retrieve-group-data-early server info)))
-	    (nnimap-finish-retrieve-group-infos server info sequences t)
-	    (setq active (nth 2 (assoc group nnimap-current-infos)))))
-	(setq active (or active '(0 . 1)))
-	(erase-buffer)
-	(insert (format "211 %d %d %d %S\n"
-			(- (cdr active) (car active))
-			(car active)
-			(cdr active)
-			group))
-	t))))
+  (if gnus-read-cached
+      (let* ((full (gnus-group-prefixed-name group `(nnimap ,server)))
+	     (active (or (gnus-active full)
+                         (and info (cdr (assq 'active (gnus-info-params info))))
+                         '(1 . 0))))
+        (with-current-buffer nntp-server-buffer
+	  (erase-buffer)
+	  (insert (format "211 %d %d %d %S\n" (max 0 (1+ (- (cdr active) (car active))))
+			  (car active) (cdr active) group)))
+        t)
+    (let ((result (nnimap-change-group
+		   ;; Don't SELECT the group if we're going to select it
+		   ;; later, anyway.
+		   (when (or dont-check
+			     (not (assoc group nnimap-current-infos)))
+		     group)
+		   server))
+	  (info (when info (list info)))
+	  active)
+      (nnimap-with-context nntp-server-buffer
+	(when result
+	  (when (or (not dont-check)
+		    (not (setq active (nth 2 (assoc group nnimap-current-infos)))))
+	    (let ((sequences (nnimap-retrieve-group-data-early server info)))
+	      (nnimap-finish-retrieve-group-infos server info sequences t)
+	      (setq active (nth 2 (assoc group nnimap-current-infos)))))
+	  (setq active (or active '(0 . 1)))
+	  (erase-buffer)
+	  (insert (format "211 %d %d %d %S\n"
+			  (- (cdr active) (car active))
+			  (car active)
+			  (cdr active)
+			  group))
+	  t)))))
 
 (deffoo nnimap-request-group-scan (group &optional server info)
   (when (nnimap-change-group nil server)
@@ -1027,7 +1118,7 @@ the key of the front-line assoc list to incorporate SERVER."
     (nreverse articles)))
 
 (deffoo nnimap-close-group (_group &optional server)
-  (when (eq nnimap-expunge 'on-exit)
+  (when (and (not gnus-read-cached) (eq nnimap-expunge 'on-exit))
     (nnoo-change-server 'nnimap server nil)
     (nnimap-with-process-buffer
       (nnimap-command "EXPUNGE"))))
@@ -1568,7 +1659,8 @@ If LIMIT, first try to limit the search to the N last articles."
 		  (insert (format "%S %d %d y\n"
 				  (gnus-group-real-name group)
 				  (cdr active)
-				  (car active))))))))))))
+				  (car active))))))))))
+    (nnimap--prefetch-group-headers server infos)))
 
 (defun nnimap-quirk (command)
   (let ((quirk (assoc command nnimap-quirks)))

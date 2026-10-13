@@ -94,6 +94,8 @@ It is computed from the marks of individual component groups.")
 
 ;;; Interface functions.
 
+(autoload 'nnimap-retrieve-cached-headers "nnimap")
+
 (nnoo-define-basics nnvirtual)
 
 
@@ -108,18 +110,22 @@ It is computed from the marks of individual component groups.")
 		     (gnus-get-buffer-create " *virtual headers*")))
 	      (carticles (nnvirtual-partition-sequence articles))
 	      (sysname (system-name))
-	      cgroup carticle article result prefix)
+	      cgroup carticle article result prefix method cached-imap)
 	  (while carticles
 	    (setq cgroup (caar carticles))
 	    (setq articles (cdar carticles))
 	    (pop carticles)
+            (setq method (gnus-find-method-for-group cgroup)
+                  cached-imap (and gnus-read-cached (eq (car method) 'nnimap)))
 	    (when (and articles
-		       (gnus-check-server
-			(gnus-find-method-for-group cgroup) t)
-		       (gnus-request-group cgroup t)
+                       (or cached-imap
+                           (and (gnus-check-server method t)
+                                (gnus-request-group cgroup t)))
 		       (setq prefix (gnus-group-real-prefix cgroup)
-                             result (gnus-retrieve-headers
-				     articles cgroup nil)))
+                             result (if cached-imap
+                                        (nnimap-retrieve-cached-headers
+                                         articles (gnus-group-real-name cgroup) (cadr method))
+                                      (gnus-retrieve-headers articles cgroup nil))))
 	      (set-buffer nntp-server-buffer)
 	      ;; If we got HEAD headers, we convert them into NOV
 	      ;; headers.  This is slow, inefficient and, come to think
@@ -163,7 +169,7 @@ It is computed from the marks of individual component groups.")
 	      (insert-buffer-substring nntp-server-buffer))
 	    ;; Anything left in articles is expired or canceled.
 	    ;; Could be smart and not tell it about articles already known?
-	    (when articles
+	    (when (and articles (not gnus-read-cached))
 	      (gnus-group-make-articles-read cgroup articles))
 	    )
 

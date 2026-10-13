@@ -3781,7 +3781,7 @@ If SELECT-ARTICLES, only select those articles from GROUP."
   (let* ((cached-entry (and gnus-background-get-unread-articles
                             (not gnus-read-cached)
                             (not no-display)
-                            (eq (car (gnus-find-method-for-group group)) 'nnvirtual)))
+                            (memq (car (gnus-find-method-for-group group)) '(nnvirtual nnimap)) t))
          (gnus-read-cached (or gnus-read-cached cached-entry))
          ;; Automatic article retrieval must not delay displaying the list.
          (gnus-auto-select-first (and (not gnus-read-cached) gnus-auto-select-first)))
@@ -5460,9 +5460,9 @@ If SELECT-ARTICLES, only select those articles from GROUP."
 	    gnus-summary-ignore-duplicates))
 	 (info (nth 1 entry))
 	 articles fetched-articles cached)
-    (unless (gnus-check-server
-             (setq-local gnus-current-select-method
-                         (gnus-find-method-for-group group)))
+    (setq-local gnus-current-select-method (gnus-find-method-for-group group))
+    (unless (or (and gnus-read-cached (eq (car gnus-current-select-method) 'nnimap))
+                (gnus-check-server gnus-current-select-method))
       (error "Couldn't open server"))
 
     (or (and entry (not (eq (car entry) t))
@@ -5573,14 +5573,15 @@ If SELECT-ARTICLES, only select those articles from GROUP."
       (setq fetched-articles
 	    (mapcar #'mail-header-number gnus-newsgroup-headers))
       (setq gnus-newsgroup-articles fetched-articles)
-      (setq gnus-newsgroup-unreads
-	    (gnus-sorted-nintersection
-	     gnus-newsgroup-unreads fetched-articles))
+      (unless gnus-read-cached
+        (setq gnus-newsgroup-unreads
+              (gnus-sorted-nintersection gnus-newsgroup-unreads fetched-articles)))
       (gnus-compute-unseen-list)
 
       ;; Removed marked articles that do not exist.
-      (gnus-update-missing-marks
-       (gnus-sorted-difference articles fetched-articles))
+      (unless gnus-read-cached
+        (gnus-update-missing-marks
+         (gnus-sorted-difference articles fetched-articles)))
       ;; We might want to build some more threads first.
       (when (and gnus-fetch-old-headers
 		 (eq gnus-headers-retrieved-by 'nov))
