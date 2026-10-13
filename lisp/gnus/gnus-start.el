@@ -930,6 +930,9 @@ If REGEXP is given, lines that match it will be deleted."
     (setq gnus-dribble-eval-file nil)
     (let ((gnus-dribble-ignore t))
       (with-current-buffer gnus-dribble-buffer
+	;; This is generated state, evaluated with dynamic binding.  Declare
+	;; that explicitly even for old dribble files without a file cookie.
+	(setq-local lexical-binding nil)
 	(eval-buffer (current-buffer))))))
 
 (defun gnus-dribble-delete-file ()

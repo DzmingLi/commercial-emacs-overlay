@@ -4,6 +4,24 @@
 (require 'gnus-start)
 (require 'gnus-group)
 
+(ert-deftest commercial-gnus-dribble-replays-legacy-state-without-warning ()
+  (let ((gnus-dribble-buffer (generate-new-buffer " *dribble-test*"))
+        (gnus-dribble-eval-file t) warnings restored)
+    (unwind-protect
+        (with-current-buffer gnus-dribble-buffer
+          (insert "(gnus-test-restore-state '(read 1 2 3))\n")
+          (let ((original (buffer-string)))
+            (cl-letf (((symbol-function 'display-warning)
+                       (lambda (&rest args) (push args warnings)))
+                      ((symbol-function 'gnus-test-restore-state)
+                       (lambda (state) (setq restored state))))
+              (gnus-dribble-eval-file))
+            (should (equal restored '(read 1 2 3)))
+            (should-not warnings)
+            (should-not gnus-dribble-eval-file)
+            (should (equal original (buffer-string)))))
+      (kill-buffer gnus-dribble-buffer))))
+
 (ert-deftest commercial-gnus-rss-scan-isolates-foreground-group-switches ()
   (require 'nnrss)
   (let* ((lock (make-mutex "rss-test"))

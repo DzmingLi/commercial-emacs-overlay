@@ -2,6 +2,23 @@
 (require 'ert)
 (require 'gnus-dispatch)
 
+(ert-deftest gnus-dispatch-main-submission-does-not-become-user-input ()
+  (let ((unread-command-events nil) published)
+    (gnus-dispatch-submit (lambda () (setq published (current-thread))))
+    (should-not published)
+    (setq unread-command-events (append unread-command-events (list ?x)))
+    (should (eq (read-event nil nil 0.1) ?x))
+    (gnus-dispatch--pump)
+    (should (eq published main-thread))))
+
+(ert-deftest gnus-dispatch-main-io-wait-publishes-without-consuming-input ()
+  (let ((unread-command-events nil) published)
+    (gnus-dispatch-submit (lambda () (setq published (current-thread))))
+    (let ((deadline (+ (float-time) 2)))
+      (while (and (not published) (< (float-time) deadline))
+        (should-not (read-event nil nil 0.05))))
+    (should (eq published main-thread))))
+
 (ert-deftest gnus-dispatch-worker-io-cannot-run-commits ()
   (let (published)
     (thread-join

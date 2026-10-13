@@ -51,11 +51,10 @@
           gnus-dispatch--installed t)))
 
 (defun gnus-dispatch--wake ()
-  "Wake the command loop without signalling a Lisp error to ourselves."
-  (if (eq (current-thread) main-thread)
-      (setq unread-command-events
-            (append unread-command-events
-                    (list (list 'thread-event main-thread gnus-dispatch--event nil))))
+  "Wake main from a worker; main submissions use the pump or command hook.
+Do not put synthetic special events in `unread-command-events': reread
+events bypass `special-event-map' and leak into commands and prompts."
+  (unless (eq (current-thread) main-thread)
     (thread-signal main-thread gnus-dispatch--event nil)))
 
 (defun gnus-dispatch-submit (function &rest arguments)
