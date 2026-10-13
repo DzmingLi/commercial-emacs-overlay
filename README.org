@@ -165,3 +165,10 @@ The overlay does not replace, rewrite or delete subscription files.
 writing into a document whose placeholder was erased during redisplay.
 Downloaded images are still cached. This patch is independent of the GTK
 worker wait fix and can also be applied without Commercial Gnus.
+
+* Feed article identities
+Atom feeds can have spaces or Unicode in their IDs or feed titles. The
+backend emits the same valid Message-ID in Summary headers and MIME bodies,
+hashing malformed stored IDs while retaining the cache keys and article
+numbers. Existing Gnus read marks need no migration. Valid existing IDs
+remain unchanged, and Message-ID lookups accept both stored and emitted IDs.

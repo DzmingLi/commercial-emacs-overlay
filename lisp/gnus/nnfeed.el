@@ -428,6 +428,26 @@ Each value in this table should be a vector of the form
              ((hash-table-p s)))
     (gethash group s)))
 
+(defun nnfeed--message-id (id)
+  "Return a parseable, stable wire Message-ID for feed identity ID.
+Keep the stored identity untouched so existing article numbers and Gnus
+marks survive. Feed titles and Atom IDs can contain spaces or Unicode."
+  (if (and (string-match-p "\\`<[^<>[:space:]]+>\\'" id)
+           (not (string-match-p "[^[:ascii:]]" id)))
+      id
+    (format "<%s@nnfeed.invalid>" (secure-hash 'sha256 id))))
+
+(defun nnfeed--article-number (article group)
+  "Resolve ARTICLE by number, stored identity, or emitted Message-ID."
+  (if (numberp article) article
+    (or (gethash article (aref group 1))
+        (let (number)
+          (maphash (lambda (n entry)
+                     (when (equal article (nnfeed--message-id (aref entry 0)))
+                       (setq number n)))
+                   (aref group 2))
+          number))))
+
 (defun nnfeed-retrieve-article (article group)
   "Retrieve headers for ARTICLE from GROUP."
   (if-let* ((a (gethash article (aref group 2))))
@@ -437,7 +457,7 @@ From: %s\nSubject: %s\nDate: %s\nMessage-ID: %s\n.\n"
                       (aref a 1)
                       (aref a 2)
                       (format-time-string "%F %H:%M" (aref a 3))
-                      (aref a 0)))
+                      (nnfeed--message-id (aref a 0))))
     (insert "404 Article not found.\n.\n")))
 
 (deffoo nnfeed-retrieve-headers (articles &optional group server _fetch-old)
@@ -450,7 +470,7 @@ From: %s\nSubject: %s\nDate: %s\nMessage-ID: %s\n.\n"
         (or (and (stringp (car articles))
                  (mapc (lambda (a)
                          (nnfeed-retrieve-article
-                          (gethash a (aref g 2)) g))
+                          (nnfeed--article-number a g) g))
                        articles))
             (and (numberp (car articles))
                  (range-map (lambda (a) (nnfeed-retrieve-article a g))
@@ -528,9 +548,7 @@ Only HEADERS of a type included in MIME are considered."
                           ,nnfeed-group-articles
                           ,nnfeed-group-article-max-num
                           ,nnfeed-group-article-min-num nil])))
-           (num (or (and (stringp article)
-                         (gethash article (aref g 1)))
-                    (and (numberp article) article)))
+           (num (nnfeed--article-number article g))
            ((and (<= num (aref g 3))
                  (>= num (aref g 4))))
            (a (gethash num (aref g 2))))
@@ -549,7 +567,7 @@ Only HEADERS of a type included in MIME are considered."
                    (aref a 2) (aref a 1)
                    (format-time-string
                     nnfeed-date-format (or (aref a 3) '(0 0)))
-                   (aref a 0))
+                   (nnfeed--message-id (aref a 0)))
                   (if (assq 'MIME-Version headers) "" "MIME-Version: 1.0\n")
                   (mapconcat (lambda (header)
                                (unless (keywordp (car header))
