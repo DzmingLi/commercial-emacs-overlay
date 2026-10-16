@@ -1,114 +1,11 @@
-#+title: commercial-emacs-overlay
+#+title: window-border-mode
 
-Selected Commercial Emacs features ported to GNU Emacs 31: the complete
-Gnus Lisp tree, native selected-window borders and GTK worker-thread wait
-fixes. GNU Emacs remains the base editor.
+Native selected-window borders for GNU Emacs 31 PGTK, ported from
+[[https://github.com/commercial-emacs/commercial-emacs][Commercial Emacs]]. The border is part of Emacs redisplay and window
+geometry, with a Cairo renderer for PGTK.
 
-* Source and license
-The bundled source is from [[https://github.com/commercial-emacs/commercial-emacs][Commercial Emacs]], pinned to revision
-=bf4184f985d0674a7c03c12eb33b66ac833d9e29=. See =UPSTREAM=, individual source
-headers and =COPYING=. This distribution preserves upstream attribution.
-The first commit imports upstream intact; GNU compatibility changes are a
-separate commit.
-
-* Installation with Nix
-This repository exports =overlays.default=. It builds GNU Emacs 31 PGTK
-with the complete built-in =lisp/gnus= tree replaced before autoload
-generation and byte/native compilation, and applies the native C patches. There is no separate Lisp loader or competing Gnus package.
-
-Add this flake input:
-
-#+begin_src nix
-inputs.commercial-emacs.url = "github:DzmingLi/commercial-emacs-overlay";
-#+end_src
-
-Then select the editor from the overlay and derive packages from it:
-
-#+begin_src nix
-let
-  commercialPkgs = pkgs.extend inputs.commercial-emacs.overlays.default;
-  editor = commercialPkgs.emacs31-pgtk-commercial;
-  epkgs = pkgs.emacsPackagesFor editor;
-in epkgs.emacsWithPackages (epkgs: [ /* your other packages */ ])
-#+end_src
-
-For Home Manager, assign this editor or its wrapped result to
-=programs.emacs.package=. Restart the daemon and graphical frames after
-switching editors. Remove old =(require 'commercial-gnus)= calls and any
-separate commercial-gnus Lisp package from your configuration.
-
-The overlay deliberately exports a named editor instead of changing every
-Emacs derivation in nixpkgs. It targets GNU Emacs 31; other versions require
-reviewing the C patch against their sources.
-
-* Integrated reading pipeline (0.5.0)
-The distribution now includes =gnus-thread-reader=, =gnus-reading=,
-=gnus-webkit-preview= and =gnus-attachment-pane=. Remove their separately
-installed copies so older packages cannot shadow the built-in modules.
-The generic =thread-reader= data/view library remains a separate Lisp module
-inside this distribution; its source-parser interfaces remain available.
-
-#+begin_src emacs-lisp
-(require 'gnus-thread-reader)
-(gnus-thread-reader-global-summary-mode 1)
-(gnus-attachment-pane-mode 1)
-(setq gnus-reading-renderer-function
-      (lambda (snapshot)
-        (if (and (display-graphic-p)
-                 (string-prefix-p "nnimap+news-letter:" (plist-get snapshot :group)))
-            'webkit 'text)))
-#+end_src
-
-=RET= opens a thread in the Summary's owned reading slot. Text, optional
-HTML and attachments use that same slot. =gnus-webkit-preview-open-thread=
-can be bound to a key for manual HTML display. Renderers receive loaded
-snapshots; they do not select articles, fetch mail or apply marks. Gnus's
-controller handles visits, navigation, late results and read state. Text
-and HTML attachments own exported files independently of MIME parser buffers.
-
-HTML uses the optional external =emacs-webkit= native module. Apply
-=patches/emacs-webkit-main-thread-api.patch= to the module: its exported C
-functions reject worker-thread calls before touching GTK. This patch is
-independent of the Emacs main-loop patches and the Gnus dispatcher.
-
-=gnus-dispatch= uses a main-thread command event, not timer affinity, to
-publish work. Jobs have deadlines, cancellation and one terminal completion.
-IMAP scan, body and mark operations use persistent batch Emacs processes,
-one serial connection owner per select method. Credentials stay out of argv;
-workers load only a minimal =gnus-backend-worker-init-file=, if configured.
-This file should provide authentication without loading the interactive init.
-Existing =auth-sources= and method parameters are copied as data.
-
-The frontend retains native newsrc/read/mark state. It checks session,
-UIDVALIDITY and source identity before committing results, rebases local
-marks over older scans, and checks every IMAP STORE acknowledgement. Explicit
-Gnus exit waits for queued mark writes before releasing the session; ordinary
-reading and marking enqueue work and return. Failed writes are reported and
-retained in the current session's pending mark journal; that journal is not a
-durable outbox across Emacs restarts.
-
-This is a staged backend migration: only =nnimap= uses process isolation.
-Other source backends still use the legacy worker bridge, with main-thread
-publication. Explicit native commands such as move/delete/expunge and the
-native Article preview compatibility command can still do synchronous I/O.
-Summary refresh now rebuilds in place from caches without exit/reselect or
-remote mark writes. It retains source-based cursor/window anchors and skips
-views with user-applied limits; native default thread folding is reapplied.
-See =ASYNC-DESIGN.org= for the target architecture and remaining boundaries.
-
-Run =make check= for the combined regression suite. For real GUI integration,
-start a disposable graphical Emacs =-Q= with =lisp/gnus= and the guarded WebKit
-package on =load-path=, then load =tests/gnus-main-publication-gui-test.el= or
-=tests/gnus-reading-gui-test.el=. Each test exits its own Emacs; do not load
-these test scripts in an existing daemon. The latter uses a synthetic mail
-actor and real WebKit/attachment windows, without accessing personal mail.
-
-* Native selected-window border
-The overlay ports Commercial Emacs's =window-border-mode= into GNU Emacs
-31 and adds a Cairo renderer for PGTK. It reserves space in window geometry
-for the border, including headers, tab lines, scrolling and scroll bars.
-This is a C redisplay feature; copying the Lisp file or hot-loading it into
-an unpatched editor is insufficient.
+* Use
+Build Emacs with this repository's patch, then enable the built-in mode:
 
 #+begin_src emacs-lisp
 (require 'window-border)
@@ -116,156 +13,62 @@ an unpatched editor is insufficient.
 (window-border-mode 1)
 #+end_src
 
-Customize the =window-border= face to change its color. The global mode
-can be enabled during daemon startup; minibuffer, pseudo windows and
-terminal frames reserve no border. Disable the mode to restore normal
-geometry. The overlay's PGTK build is tested; other graphical ports are
-not advertised as supported.
+Customize the =window-border= face to change its color. Disable the mode
+with =(window-border-mode -1)= to restore normal geometry. Minibuffer,
+pseudo windows and terminal frames reserve no border. The mode can be
+enabled during daemon startup.
 
-Native regressions are in =tests/window-border-test.el=. Run the tests
-with the built editor in both batch mode and an interactive PGTK frame;
-the graphical geometry tests deliberately skip terminal frames. Actual
-Cairo painting also requires visual inspection after switching windows,
-scrolling, splitting and resizing.
+This feature requires changes to Emacs's C redisplay code. A patched
+Emacs binary is required; copying its Lisp file into another Emacs does
+not install the feature. PGTK is the supported and tested graphical port.
 
-* Background scanning
-Use the normal Gnus commands, including =g= in Group. Upstream enables
-=gnus-background-get-unread-articles= in interactive Emacs. Configure
-ordinary Gnus activation levels and subscription state as usual.
+* Nix overlay
+This flake exports =overlays.default= and a named editor,
+=emacs31-pgtk-window-border=:
 
-Startup and entry into a virtual group share a coalesced refresh request.
-The Group or Summary view is displayed first; virtual summaries use known
-source ranges and headers. Sources without cached ranges appear after
-scanning completes. An initially empty virtual Summary stays open while
-waiting, and automatic article selection is suppressed during cached entry.
-Selecting an article explicitly retains normal backend behavior.
-IMAP header snapshots are filled on the scanning worker and saved privately,
-scoped to server, mailbox and UIDVALIDITY. Cached native/virtual Summary
-entry and refresh never SELECT an IMAP mailbox or fetch headers over the
-network. Missing snapshot headers appear when their scan completes; cache
-misses do not mark articles read or nonexistent. Background re-entry also
-skips IMAP expunge operations.
+#+begin_src nix
+inputs.window-border-mode.url = "github:DzmingLi/window-border-mode";
 
-The scanner selects eligible groups on the main thread, then resolves
-backend capabilities and scans remaining legacy sources serially in a worker.
-IMAP uses the isolated actor described above. Virtual
-groups are projections of source state: their counts are computed on the
-main thread without rebuilding a reader's live article mapping. Group
-buffer updates and =gnus-after-getting-new-news-hook= run on the main
-thread. Completion callbacks are scoped to the newsrc session, and each
-worker owns its timeout timer.
+# In a module receiving pkgs and inputs:
+let
+  borderPkgs = pkgs.extend inputs.window-border-mode.overlays.default;
+  editor = borderPkgs.emacs31-pgtk-window-border;
+  epkgs = pkgs.emacsPackagesFor editor;
+in
+  epkgs.emacsWithPackages (epkgs: [ /* your packages */ ])
+#+end_src
 
-IMAP scans receive and parse their complete flag response while holding the
-connection mutex. The publication phase uses that captured data, so a
-foreground request reusing the connection cannot discard scan responses or
-misclassify existing messages as nonexistent.
-Each send retains its own command tag across thread switches. Reply waits
-locate that exact completion even when later replies follow it, skipping
-opaque IMAP literal data. A 60-second response timeout closes stalled
-connections so retries cannot reuse ambiguous pending commands. Customize
-=nnimap-response-timeout= for slower connections.
+For Home Manager, assign the editor or its wrapped result to
+=programs.emacs.package=. Use =emacsPackagesFor= with that same editor for
+its Lisp and native packages. Restart Emacs after activating a new binary.
 
-=gnus-summary-refresh= rebuilds visible summaries from updated cached
-state. It retains the rendered article, source-based cursor and window
-anchors, and skips summaries with a user-applied limit. A virtual mapping
-records the source ranges it represents, so exiting an older view cannot
-mark newly arrived articles read or erase marks outside that snapshot.
-This module uses native hooks; it installs no advice on core Gnus commands.
+The overlay adds only =patches/gnu-emacs31-window-border.patch= to the
+base editor. It targets GNU Emacs 31. The repository contains the patch,
+its regressions, this documentation and upstream/license information.
 
-Background startup restores last known unread counts and active ranges from
-the newsrc file, so the Group list appears before the first scan completes.
-These values are a stale display snapshot; completed scans update them.
-Offline, child and synchronous startup retain the existing paths. Primary
-server initialization, custom user hooks, posting and fetching a thread's
-replies are not automatically made asynchronous. CPU-intensive sorting and
-rendering can still occupy the Lisp interpreter. The test suite covers
-worker preparation versus main-thread publication, a cold virtual view
-filling from source state, article and cursor preservation, newly arrived
-unread/marked articles, user limits and obsolete-session callbacks.
+* Tests
+Use the patched editor to run batch regressions:
 
-* GNU Emacs 31 GTK/PGTK patch
-=patches/gnu-emacs31-glib-worker-wait.patch= keeps GLib/GTK event handling
-on the main thread, following Commercial Emacs's C-level separation.
-In a live unpatched PGTK session, a background scan coincided with a GLib
-ownership assertion, a spinning worker and an unresponsive main thread.
-Lisp-only batch tests do not exercise this GUI path.
+#+begin_src sh
+make check EMACS=/path/to/patched/emacs
+#+end_src
 
-Both paths into GUI events are guarded: =xg_select= during I/O waits and
-=gobble_input=/=process_pending_signals= at Lisp interruption points.
-The latter can run during IMAP's UTF-7 conversion or temporary-buffer
-cleanup. A worker must leave pending input for the main thread; otherwise
-WebKit's thread-affinity assertions can abort the entire editor.
+For graphical geometry checks, run a separate disposable PGTK process:
 
-=tests/glib-worker-gui-test.el= exercises real WebKit creation/destruction
-while three workers convert strings and wait for I/O. Run it only in a
-fresh graphical Emacs with no personal init file. Compile the accompanying
-=tests/glib-main-thread-probe.c= as a shared library with =-ldl -pthread=,
-then set =LD_PRELOAD= to that library and =XDG_STATE_HOME= to a temporary
-directory. Supply WebKit on Emacs's load path. The probe exits with status
-76 before any worker dispatches a GLib callback. A passing run must report
-=PASS= and a positive number of main-thread dispatches, then exit zero.
-The =make check-glib-worker EMACS=/path/to/patched/emacs= target compiles
-the probe, isolates state, runs the test and checks those results.
-WebKit's module must also defer user-pointer finalizers to the main GTK
-loop: Emacs can garbage-collect such pointers on a Lisp worker. The core
-input guards cannot protect a module that calls GTK directly during GC.
+#+begin_src sh
+/path/to/patched/emacs -Q \
+  -l tests/window-border-test.el \
+  --eval '(let ((noninteractive t)) (ert-run-tests-batch-and-exit))'
+#+end_src
 
-The additional =patches/gnu-emacs31-main-loop.patch= prevents an I/O wait
-on a Lisp worker from executing ordinary or idle timers and pending
-funcalls. These callbacks stay queued for the main thread, where reader
-body publication and the first WebKit preview can safely run. A captured
-live failure showed WebKit's process-launch completion asserting that its
-main RunLoop belonged to another native thread. A controlled timer test
-reproduced that scheduling error on the old core.
+The suite checks width validation, terminal/minibuffer geometry, space
+reservation and restoration, nested splits, scrolling and resizing. GUI
+checks skip terminal frames. Inspect Cairo painting visually when changing
+the renderer, especially after switching windows or resizing them. The GUI
+test command exits its own Emacs process.
 
-Both PGTK input reads and GLib-aware I/O waits return to Lisp after at most
-64 dispatch rounds or a four-millisecond budget. Pending events are kept
-for the next turn; one expensive native callback can still exceed that
-budget. Fatal cleanup skips timer and graphical input callbacks, avoiding
-recursive dispatch into a failed WebKit callback during process cleanup.
-
-=tests/run-main-loop-tests.py= runs a timer ownership check, a permanently
-ready GLib source, a cold WebKit preview scheduled during worker I/O,
-the existing worker/GC stress test, and bounded fatal cleanup. It uses
-separate processes with temporary state and no personal configuration;
-core dumps are disabled for its fatal-cleanup fixture. Run
-=make check-main-loop EMACS=/path/to/patched/emacs WEBKIT_DIRECTORY=/path/to/webkit/lisp EMACS_MODULE_INCLUDE=/path/to/emacs/include=.
-The C fixture requires a compiler and GLib development metadata through
-=pkg-config=. The Python runner also accepts explicit =--glib-flags=.
-
-The overlay applies these patches while building the editor. Lisp hot-loading
-cannot apply a C patch. Non-Nix installations must replace the built-in
-Gnus tree and apply this patch to GNU Emacs 31 sources before building.
-
-* Compatibility and tests
-GNU compatibility changes are separate from the upstream import and the
-overlay packaging commit. They adapt Message's syntax cache hook, lazily
-load Summary dependencies, declare compiler warning bindings, fix feed
-parsing and generated RSS state headers, and honor foreign group methods
-and activation levels. Conditional bindings use GNU Emacs 31's current
-=when-let*= and =if-let*= macros.
-
-Run =make check=. Tests include the real native scanner with a controlled
-backend wait and a main-loop heartbeat.
-An isolated live NixOS Discourse scan returned immediately and fetched 30
-articles; it did not use personal credentials or modify personal newsrc.
-
-Third-party backends continue to use standard Gnus methods. gnus-inbox must
-make its custom Summary mark variables buffer-local without assuming GNU
-Gnus's obsolete =gnus-summary-local-variables= registry exists.
-
-For rollback, select the original nixpkgs editor and restart Emacs.
-The overlay does not replace, rewrite or delete subscription files.
-
-* Pending HTML images
-=patches/gnu-emacs31-shr-stale-image.patch= prevents an image request from
-writing into a document whose placeholder was erased during redisplay.
-Downloaded images are still cached. This patch is independent of the GTK
-worker wait fix and can also be applied without Commercial Gnus.
-
-* Feed article identities
-Atom feeds can have spaces or Unicode in their IDs or feed titles. The
-backend emits the same valid Message-ID in Summary headers and MIME bodies,
-hashing malformed stored IDs while retaining the cache keys and article
-numbers. Existing Gnus read marks need no migration. Valid existing IDs
-remain unchanged, and Message-ID lookups accept both stored and emitted IDs.
+* Source and license
+See =UPSTREAM= for the Commercial Emacs feature commits and local PGTK
+adaptations. The patch preserves the original source attribution.
+Distributed under GPL-3.0-or-later; see =COPYING= and source headers.
+Earlier repository revisions remain available in Git history.

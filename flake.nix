@@ -1,25 +1,19 @@
 {
-  description = "GNU Emacs 31 with Commercial Gnus, native window borders and GTK worker-wait fixes";
-  outputs = { self }: {
-    overlays.default = final: prev: {
-      emacs31-pgtk-commercial = prev.emacs31-pgtk.overrideAttrs (old: {
+  description = "Native selected-window borders for GNU Emacs 31 PGTK";
+
+  outputs = _: {
+    overlays.default = _final: prev: {
+      emacs31-pgtk-window-border = prev.emacs31-pgtk.overrideAttrs (old: {
+        pname = "emacs-pgtk-window-border";
         patches = (old.patches or [ ]) ++ [
-          ./patches/gnu-emacs31-glib-worker-wait.patch
-          ./patches/gnu-emacs31-main-loop.patch
-          ./patches/gnu-emacs31-shr-stale-image.patch
           ./patches/gnu-emacs31-window-border.patch
         ];
-        postPatch = (old.postPatch or "") + ''
-          # Replace the complete built-in tree before autoload generation and
-          # byte/native compilation.  No competing Gnus copy is installed.
-          rm -rf lisp/gnus
-          cp -R ${./lisp/gnus} lisp/gnus
-          chmod -R u+w lisp/gnus
-        '';
         passthru = (old.passthru or { }) // {
-          commercialGnusRevision = "bf4184f985d0674a7c03c12eb33b66ac833d9e29";
-          commercialGnusVersion = "0.4.0";
-          commercialEmacsOverlayVersion = "0.5.0";
+          windowBorderModeVersion = "0.1.0";
+        };
+        meta = (old.meta or { }) // {
+          description = "GNU Emacs 31 PGTK with native selected-window borders";
+          homepage = "https://github.com/DzmingLi/window-border-mode";
         };
       });
     };
